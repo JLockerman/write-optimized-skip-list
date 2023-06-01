@@ -1,0 +1,60 @@
+---
+source: src/range_mapped.rs
+expression: list.output_dot()
+---
+digraph {
+  node [shape=plaintext];
+  rankdir="TB";
+  ranksep="0.02";
+  splines=polyline;
+
+n1 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>0</TD>
+      <TD>1</TD>
+      <TD>3</TD>
+    </TR>
+    <TR>
+      <TD>6</TD>
+      <TD>1</TD>
+      <TD>13</TD>
+    </TR>
+  </TABLE>
+>]
+
+n2 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>7</TD>
+    </TR>
+    <TR>
+      <TD>71</TD>
+    </TR>
+  </TABLE>
+>]
+
+n0 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">0</TD>
+          <TD PORT="p1">1</TD>
+          <TD PORT="p2">3</TD>
+          <TD PORT="p3">7</TD>
+          <TD>∞</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+  n0:p0:s -> n1:n [weight=0.01]
+  n0:p1:s -> n1:n [weight=0.01]
+  n0:p2:s -> n1:n [weight=0.01]
+  n0:p3:s -> n2:n [weight=0.01]
+}
+
