@@ -1,0 +1,294 @@
+---
+source: src/range_mapped.rs
+expression: list.output_dot()
+---
+digraph {
+  node [shape=plaintext];
+  rankdir="TB";
+  ranksep="0.02";
+  splines=polyline;
+
+n4 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD> ∅ </TD></TR>
+  </TABLE>
+>]
+
+n3 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">-∞</TD>
+          <TD>10246656</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n2 [group="h2",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">-∞</TD>
+          <TD>10246656</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n1 [group="h3",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">-∞</TD>
+          <TD>10246656</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n8 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>10246656</TD>
+    </TR>
+    <TR>
+      <TD>1245184</TD>
+    </TR>
+  </TABLE>
+>]
+
+n7 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">10246656</TD>
+          <TD>1509949441</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n6 [group="h2",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">10246656</TD>
+          <TD>1509949441</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n5 [group="h3",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">10246656</TD>
+          <TD>1509949441</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n12 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>1509949441</TD>
+    </TR>
+    <TR>
+      <TD>10246746</TD>
+    </TR>
+  </TABLE>
+>]
+
+n11 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">1509949441</TD>
+          <TD>1515847713</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n10 [group="h2",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">1509949441</TD>
+          <TD>1515847713</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n15 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>1515847713</TD>
+    </TR>
+    <TR>
+      <TD>1048576</TD>
+    </TR>
+  </TABLE>
+>]
+
+n14 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">1515847713</TD>
+          <TD>4244581665</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n13 [group="h2",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">1515847713</TD>
+          <TD>4244581665</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n18 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>4244581665</TD>
+    </TR>
+    <TR>
+      <TD>0</TD>
+    </TR>
+  </TABLE>
+>]
+
+n17 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">4244581665</TD>
+          <TD>∞</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n16 [group="h2",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+      Insert(4294967295, 4294967295, 1)    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">4244581665</TD>
+          <TD>∞</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n9 [group="h3",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">1509949441</TD>
+          <TD PORT="p1">1515847713</TD>
+          <TD PORT="p2">4244581665</TD>
+          <TD>∞</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n0 [group="h4",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">-∞</TD>
+          <TD PORT="p1">10246656</TD>
+          <TD PORT="p2">1509949441</TD>
+          <TD>∞</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+  n3:p0:s -> n4:n [weight=0.01]
+  n2:p0:s -> n3:n [weight=0.01]
+  n1:p0:s -> n2:n [weight=0.01]
+  n7:p0:s -> n8:n [weight=0.01]
+  n6:p0:s -> n7:n [weight=0.01]
+  n5:p0:s -> n6:n [weight=0.01]
+  n11:p0:s -> n12:n [weight=0.01]
+  n10:p0:s -> n11:n [weight=0.01]
+  n14:p0:s -> n15:n [weight=0.01]
+  n13:p0:s -> n14:n [weight=0.01]
+  n17:p0:s -> n18:n [weight=0.01]
+  n16:p0:s -> n17:n [weight=0.01]
+  n9:p0:s -> n10:n [weight=0.01]
+  n9:p1:s -> n13:n [weight=0.01]
+  n9:p2:s -> n16:n [weight=0.01]
+  n0:p0:s -> n1:n [weight=0.01]
+  n0:p1:s -> n5:n [weight=0.01]
+  n0:p2:s -> n9:n [weight=0.01]
+}
+

@@ -1,0 +1,62 @@
+---
+source: src/range_mapped.rs
+expression: list.output_dot()
+---
+digraph {
+  node [shape=plaintext];
+  rankdir="TB";
+  ranksep="0.02";
+  splines=polyline;
+
+n1 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>1</TD>
+      <TD>3145818</TD>
+    </TR>
+    <TR>
+      <TD>5900341</TD>
+      <TD>23040</TD>
+    </TR>
+  </TABLE>
+>]
+
+n2 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>9198170</TD>
+      <TD>1518339839</TD>
+      <TD>4294967295</TD>
+    </TR>
+    <TR>
+      <TD>0</TD>
+      <TD>3473564</TD>
+      <TD>1512528639</TD>
+    </TR>
+  </TABLE>
+>]
+
+n0 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">-∞</TD>
+          <TD PORT="p1">3145818</TD>
+          <TD PORT="p2">9198170</TD>
+          <TD PORT="p3">4294967295</TD>
+          <TD>∞</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+  n0:p0:s -> n1:n [weight=0.01]
+  n0:p1:s -> n1:n [weight=0.01]
+  n0:p2:s -> n2:n [weight=0.01]
+  n0:p3:s -> n2:n [weight=0.01]
+}
+

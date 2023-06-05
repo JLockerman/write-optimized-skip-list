@@ -1,0 +1,43 @@
+---
+source: src/range_mapped.rs
+expression: list.output_dot()
+---
+digraph {
+  node [shape=plaintext];
+  rankdir="TB";
+  ranksep="0.02";
+  splines=polyline;
+
+n1 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+      Insert(16843009, 16843009, 2) Insert(16843248, 1509987073, 2) Insert(1442906369, 1431655765, 2)    </TD></TR>
+    <TR><TD>
+    </TD></TR>
+  </TABLE>
+>]
+
+n0 [group="h2",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">-∞</TD>
+          <TD PORT="p1">16843009</TD>
+          <TD PORT="p2">16843248</TD>
+          <TD PORT="p3">1442906369</TD>
+          <TD>∞</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+  n0:p0:s -> n1:n [weight=0.01]
+  n0:p1:s -> n1:n [weight=0.01]
+  n0:p2:s -> n1:n [weight=0.01]
+  n0:p3:s -> n1:n [weight=0.01]
+}
+
