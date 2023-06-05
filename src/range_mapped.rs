@@ -15,7 +15,9 @@ use rand::{distributions::Bernoulli, prelude::Distribution, rngs::StdRng, Seedab
 use itertools::Itertools;
 
 use crate::{
-    dense_range_map::{map_builder, DenseRangeMap, Range, RangeBound, SubEntries, ValueBuilder},
+    dense_range_map::{
+        map_builder, DenseRangeMap, KeyBuilder, Range, RangeBound, SubEntries, ValueBuilder,
+    },
     merge_dedup::{dedup_all_but_last_by, merge_dedup},
 };
 
@@ -382,18 +384,55 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         K: Ord + Clone,
         V: Clone,
     {
+        let buffer: VecDeque<_> = ops.collect();
+        let (sub_entries, (before, _after)) = self.entries.sub_entries(range);
+
+        let mut key_builder = map_builder();
+
+        self.apply_ops_to_pivots(sub_entries, &buffer, before, &mut key_builder, range);
+
+        let mut value_builder = key_builder.finish_with(range.end().cloned());
+
+        if self.height == 1 {
+            self.apply_ops_to_leaves(sub_entries, buffer, &mut value_builder);
+        } else if sub_entries.is_empty() {
+            let temp_child: Self = Self::empty(self.b, self.height - 1);
+            temp_child.add_ops(range, buffer.into_iter(), &mut value_builder);
+        } else {
+            Self::apply_ops_to_children(range, sub_entries, buffer, &mut value_builder);
+        }
+
+        value_builder
+            .finish()
+            .map(|entries| {
+                Rc::new(Self {
+                    height: self.height,
+                    b: self.b,
+                    buffer: vec![],
+                    entries,
+                })
+            })
+            .collect()
+    }
+
+    fn apply_ops_to_pivots(
+        &self,
+        sub_entries: SubEntries<K, Rc<dyn Any>>,
+        buffer: &VecDeque<Op<K, V>>,
+        before: Option<RangeBound<&K>>,
+        key_builder: &mut KeyBuilder<K>,
+        range: Range<&K>,
+    ) where
+        K: Ord + Clone,
+    {
         use crate::dense_range_map::RangeBound::{Includes, NegInf};
         use itertools::EitherOrBoth::*;
         use Op::*;
-
-        let buffer: VecDeque<_> = ops.collect();
-        let (sub_entries, (before, _after)) = self.entries.sub_entries(range);
 
         let pivots_and_ops = sub_entries
             .leads()
             .merge_join_by(buffer.iter(), |k, op| k.cmp(&Includes(op.key())));
 
-        let mut key_builder = map_builder();
         let mut seen_first_pivot = false;
         for pop in pivots_and_ops {
             // TODO FIXME if we have an Insert in a range we may need to split it
@@ -431,29 +470,6 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             };
             key_builder.add_key_to_map(bound);
         }
-
-        let mut value_builder = key_builder.finish_with(range.end().cloned());
-
-        if self.height == 1 {
-            self.apply_ops_to_leaves(sub_entries, buffer, &mut value_builder);
-        } else if sub_entries.is_empty() {
-            let temp_child: Self = Self::empty(self.b, self.height - 1);
-            temp_child.add_ops(range, buffer.into_iter(), &mut value_builder);
-        } else {
-            Self::apply_ops_to_children(range, sub_entries, buffer, &mut value_builder);
-        }
-
-        value_builder
-            .finish()
-            .map(|entries| {
-                Rc::new(Self {
-                    height: self.height,
-                    b: self.b,
-                    buffer: vec![],
-                    entries,
-                })
-            })
-            .collect()
     }
 
     fn apply_ops_to_leaves(
