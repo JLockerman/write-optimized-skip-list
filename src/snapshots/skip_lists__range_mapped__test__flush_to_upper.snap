@@ -10,6 +10,27 @@ digraph {
 
 n2 [group="h0",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD> ∅ </TD></TR>
+  </TABLE>
+>]
+
+n1 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">-∞</TD>
+          <TD>0</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n4 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR>
       <TD>0</TD>
     </TR>
@@ -19,7 +40,7 @@ n2 [group="h0",label=<
   </TABLE>
 >]
 
-n1 [group="h1",label=<
+n3 [group="h1",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR><TD>
     </TD></TR>
@@ -34,7 +55,7 @@ n1 [group="h1",label=<
   </TABLE>
 >]
 
-n4 [group="h0",label=<
+n6 [group="h0",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR>
       <TD>1</TD>
@@ -45,7 +66,7 @@ n4 [group="h0",label=<
   </TABLE>
 >]
 
-n3 [group="h1",label=<
+n5 [group="h1",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR><TD>
     </TD></TR>
@@ -60,7 +81,7 @@ n3 [group="h1",label=<
   </TABLE>
 >]
 
-n6 [group="h0",label=<
+n8 [group="h0",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR>
       <TD>3</TD>
@@ -71,7 +92,7 @@ n6 [group="h0",label=<
   </TABLE>
 >]
 
-n5 [group="h1",label=<
+n7 [group="h1",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR><TD>
     </TD></TR>
@@ -86,7 +107,7 @@ n5 [group="h1",label=<
   </TABLE>
 >]
 
-n8 [group="h0",label=<
+n10 [group="h0",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR>
       <TD>7</TD>
@@ -97,7 +118,7 @@ n8 [group="h0",label=<
   </TABLE>
 >]
 
-n7 [group="h1",label=<
+n9 [group="h1",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR><TD>
     </TD></TR>
@@ -119,10 +140,11 @@ n0 [group="h2",label=<
     <TR><TD>
       <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
         <TR>
-          <TD PORT="p0">0</TD>
-          <TD PORT="p1">1</TD>
-          <TD PORT="p2">3</TD>
-          <TD PORT="p3">7</TD>
+          <TD PORT="p0">-∞</TD>
+          <TD PORT="p1">0</TD>
+          <TD PORT="p2">1</TD>
+          <TD PORT="p3">3</TD>
+          <TD PORT="p4">7</TD>
           <TD>∞</TD>
         </TR>
       </TABLE>
@@ -134,9 +156,11 @@ n0 [group="h2",label=<
   n3:p0:s -> n4:n [weight=0.01]
   n5:p0:s -> n6:n [weight=0.01]
   n7:p0:s -> n8:n [weight=0.01]
+  n9:p0:s -> n10:n [weight=0.01]
   n0:p0:s -> n1:n [weight=0.01]
   n0:p1:s -> n3:n [weight=0.01]
   n0:p2:s -> n5:n [weight=0.01]
   n0:p3:s -> n7:n [weight=0.01]
+  n0:p4:s -> n9:n [weight=0.01]
 }
 

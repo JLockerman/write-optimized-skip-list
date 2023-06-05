@@ -10,27 +10,7 @@ digraph {
 
 n5 [group="h0",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
-    <TR>
-      <TD>0</TD>
-      <TD>256</TD>
-    </TR>
-    <TR>
-      <TD>90</TD>
-      <TD>12288</TD>
-    </TR>
-  </TABLE>
->]
-
-n6 [group="h0",label=<
-<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
-    <TR>
-      <TD>8192</TD>
-      <TD>2354731520</TD>
-    </TR>
-    <TR>
-      <TD>1509949530</TD>
-      <TD>0</TD>
-    </TR>
+    <TR><TD> ∅ </TD></TR>
   </TABLE>
 >]
 
@@ -41,9 +21,8 @@ n4 [group="h1",label=<
     <TR><TD>
       <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
         <TR>
-          <TD PORT="p0">0</TD>
-          <TD PORT="p1">8192</TD>
-          <TD>∞</TD>
+          <TD PORT="p0">-∞</TD>
+          <TD>0</TD>
         </TR>
       </TABLE>
     </TD></TR>
@@ -95,7 +74,49 @@ n1 [group="h4",label=<
   </TABLE>
 >]
 
-n9 [group="h2",label=<
+n10 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>0</TD>
+      <TD>256</TD>
+    </TR>
+    <TR>
+      <TD>90</TD>
+      <TD>12288</TD>
+    </TR>
+  </TABLE>
+>]
+
+n11 [group="h0",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR>
+      <TD>8192</TD>
+      <TD>2354731520</TD>
+    </TR>
+    <TR>
+      <TD>1509949530</TD>
+      <TD>0</TD>
+    </TR>
+  </TABLE>
+>]
+
+n9 [group="h1",label=<
+<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+    <TR><TD>
+    </TD></TR>
+    <TR><TD>
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
+        <TR>
+          <TD PORT="p0">0</TD>
+          <TD PORT="p1">8192</TD>
+          <TD>∞</TD>
+        </TR>
+      </TABLE>
+    </TD></TR>
+  </TABLE>
+>]
+
+n8 [group="h2",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR><TD>
     </TD></TR>
@@ -110,7 +131,7 @@ n9 [group="h2",label=<
   </TABLE>
 >]
 
-n8 [group="h3",label=<
+n7 [group="h3",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR><TD>
     </TD></TR>
@@ -125,7 +146,7 @@ n8 [group="h3",label=<
   </TABLE>
 >]
 
-n7 [group="h4",label=<
+n6 [group="h4",label=<
 <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
     <TR><TD>
     </TD></TR>
@@ -157,14 +178,15 @@ n0 [group="h5",label=<
 >]
 
   n4:p0:s -> n5:n [weight=0.01]
-  n4:p1:s -> n6:n [weight=0.01]
   n3:p0:s -> n4:n [weight=0.01]
   n2:p0:s -> n3:n [weight=0.01]
   n1:p0:s -> n2:n [weight=0.01]
-  n9:p0:s -> n4:n [weight=0.01]
+  n9:p0:s -> n10:n [weight=0.01]
+  n9:p1:s -> n11:n [weight=0.01]
   n8:p0:s -> n9:n [weight=0.01]
   n7:p0:s -> n8:n [weight=0.01]
+  n6:p0:s -> n7:n [weight=0.01]
   n0:p0:s -> n1:n [weight=0.01]
-  n0:p1:s -> n7:n [weight=0.01]
+  n0:p1:s -> n6:n [weight=0.01]
 }
 

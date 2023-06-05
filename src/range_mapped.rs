@@ -401,11 +401,11 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         V: Clone,
     {
         let buffer: VecDeque<_> = ops.collect();
-        let (sub_entries, (before, _after)) = self.entries.sub_entries(range);
+        let (sub_entries, (_before, _after)) = self.entries.sub_entries(range);
 
         let mut key_builder = map_builder();
 
-        self.apply_ops_to_pivots(sub_entries, &buffer, before, &mut key_builder, range);
+        self.apply_ops_to_pivots(sub_entries, &buffer, &mut key_builder, range);
 
         let mut value_builder = key_builder.finish_with(range.end().cloned());
 
@@ -436,7 +436,6 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         &self,
         sub_entries: SubEntries<K, Rc<dyn Any>>,
         buffer: &VecDeque<Op<K, V>>,
-        before: Option<RangeBound<&K>>,
         key_builder: &mut KeyBuilder<K, bool>,
         range: Range<&K>,
     ) where
@@ -450,13 +449,17 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             .leads()
             .merge_join_by(buffer.iter(), |k, op| k.cmp(&Includes(op.key())));
 
+        if self.entries.sub_entries(Range::everything()).0.is_empty() {
+            key_builder.start_new_map_with(NegInf, true);
+        }
+
         let mut seen_first_pivot = false;
         for pop in pivots_and_ops {
             // TODO FIXME if we have an Insert in a range we may need to split it
             if let (false, Left(k) | Both(k, Insert(..))) = (seen_first_pivot, &pop) {
                 seen_first_pivot = true;
                 // if this is the first pivot in the node then it may be a lead pivot
-                if before.is_none() && (key_builder.is_empty() || self.starts_with_lead) {
+                if key_builder.is_empty() || self.starts_with_lead {
                     key_builder.start_new_map_with(k.cloned(), self.starts_with_lead);
                     continue;
                 }
@@ -596,6 +599,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         });
 
         for (mut child_range, child_node) in child_ranges {
+            // let end = buffer.partition_point(|op| *child_range.end() > &op.key());
             let end = buffer.partition_point(|op| child_range.contains(&op.key()));
             if end == 0 {
                 value_builder.add_value_for_range(child_range, child_node.clone());
@@ -649,11 +653,12 @@ impl<K, V> LeafNode<K, V> {
     where
         K: Ord,
     {
-        let Ok(idx) = self.sub_entries(search_range).binary_search_by_key(&k, |(k, _)| k) else {
+        let sub_entries = self.sub_entries(search_range);
+        let Ok(idx) = sub_entries.binary_search_by_key(&k, |(k, _)| k) else {
             return None
         };
 
-        Some(&self.entries[idx].1)
+        Some(&sub_entries[idx].1)
     }
 
     fn insert(&mut self, k: K, v: V)
@@ -1388,6 +1393,56 @@ mod test {
         list.insert(2122219134, 16962);
         insta::assert_snapshot!(list.output_dot());
         assert_eq!(list.get(&0), Some(&1107296256));
+    }
 
+    #[test]
+    fn use_precise_leads() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(1515847713, 1048576);
+        list.insert(10246656, 1245184);
+        list.insert(1509949441, 10246746);
+        list.insert(4244581665, 0);
+        list.insert(4294967295, 4294967295);
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn index_subentries_in_leaf_search() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(2565275692, 1509960833);
+        assert_eq!(list.get(&2565275692), Some(&1509960833));
+        list.insert(59, 1817837568);
+        assert_eq!(list.get(&2565275692), Some(&1509960833));
+        list.insert(168034394, 945460521);
+        assert_eq!(list.get(&2565275692), Some(&1509960833));
+        list.insert(4279185920, 65535);
+        assert_eq!(list.get(&2565275692), Some(&1509960833));
+        list.insert(805329408, 741684533);
+        insta::assert_snapshot!(list.output_dot());
+        assert_eq!(list.get(&2565275692), Some(&1509960833));
+    }
+
+    #[test]
+    fn new_neginfs_propogate() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(1229539659, 1229539657);
+        list.insert(1263094016, 1229539657);
+        list.insert(1516849481, 27738);
+        list.insert(1230690906, 7101018);
+        list.insert(5954138, 5910528);
+        assert_eq!(list.get(&5954138), Some(&5910528));
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn all_levels_start_with_neginf() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(6488064, 825307445);
+        list.insert(890384433, 892679477);
+        list.insert(2139062143, 2139062143);
+        list.insert(2139062143, 2139062143);
+        list.insert(8192, 134217728);
+        list.insert(905262389, 892679477);
+        insta::assert_snapshot!(list.output_dot());
     }
 }

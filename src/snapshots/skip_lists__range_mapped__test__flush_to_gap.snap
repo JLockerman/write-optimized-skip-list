@@ -26,7 +26,8 @@ n2 [group="h1",label=<
     <TR><TD>
       <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">
         <TR>
-          <TD PORT="p0">0</TD>
+          <TD PORT="p0">-∞</TD>
+          <TD PORT="p1">0</TD>
           <TD>1</TD>
         </TR>
       </TABLE>
@@ -191,6 +192,7 @@ n0 [group="h3",label=<
 >]
 
   n2:p0:s -> n3:n [weight=0.01]
+  n2:p1:s -> n3:n [weight=0.01]
   n1:p0:s -> n2:n [weight=0.01]
   n5:p0:s -> n6:n [weight=0.01]
   n4:p0:s -> n5:n [weight=0.01]
