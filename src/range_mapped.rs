@@ -175,8 +175,17 @@ impl<K: 'static, V: 'static> List<K, V> {
                 }
             }
             root => {
-                let old_root = replace(root, Nothing).to_node();
-                let new_root = UpperNode::new_level(self.b, key, val, height, old_root);
+                let (old_height, mut old_root) = replace(root, Nothing).to_node();
+                if old_height > 0 {
+                    let mut r = Rc::downcast::<UpperNode<K, V>>(old_root).unwrap();
+                    Rc::get_mut(&mut r)
+                        .unwrap()
+                        .buffer
+                        .sort_by(|a, b| a.key().cmp(b.key()));
+                    old_root = r;
+                }
+                let new_root =
+                    UpperNode::new_level(self.b, key, val, height, (old_height, old_root));
                 *root = Node(new_root);
             }
         }
@@ -957,10 +966,7 @@ impl<K, V> From<Rc<LeafNode<K, V>>> for Root<K, V> {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        dense_range_map::{Range, RangeBound},
-        // range_mapped::structural_eq,
-    };
+    use crate::dense_range_map::{Range, RangeBound};
 
     use RangeBound::{NegInf, PosInf};
 
@@ -1349,13 +1355,24 @@ mod test {
     }
 
     #[test]
-    fn fuzz_repro4() {
+    fn add_neg_inf_to_l1_root() {
         let mut list: super::List<u32, u32> = super::List::new(3);
         list.insert(3145818, 23040);
         list.insert(1518339839, 3473564);
         list.insert(4294967295, 1512528639);
         list.insert(9198170, 0);
         list.insert(1, 5900341);
+        insta::assert_snapshot!(list.output_dot());
+    }
+    #[test]
+    fn old_roots_get_sorted() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(2122219057, 12670);
+        list.insert(875836468, 369112372);
+        list.insert(830373502, 4281401344);
+        list.insert(9686330, 4294967289);
+        list.insert(557990526, 656877402);
+        assert_eq!(list.get(&875836468), Some(&369112372));
         insta::assert_snapshot!(list.output_dot());
     }
 }
