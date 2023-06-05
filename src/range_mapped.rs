@@ -396,6 +396,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         let mut key_builder = map_builder();
         let mut seen_first_pivot = false;
         for pop in pivots_and_ops {
+            // TODO FIXME if we have an Insert in a range we may need to split it
             if let (false, Left(k) | Both(k, Insert(..))) = (seen_first_pivot, &pop) {
                 seen_first_pivot = true;
                 // if this is the first pivot in the node then it may be a lead pivot
