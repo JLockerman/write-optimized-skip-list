@@ -178,11 +178,7 @@ impl<K: 'static, V: 'static> List<K, V> {
                 let (old_height, mut old_root) = replace(root, Nothing).to_node();
                 if old_height > 0 {
                     let mut r = Rc::downcast::<UpperNode<K, V>>(old_root).unwrap();
-                    let buffer = &mut Rc::get_mut(&mut r).unwrap().buffer;
-
-                    buffer.sort_by(|a, b| a.key().cmp(b.key()));
-                    dedup_all_but_last_by(buffer, |a, b| a.key() == b.key());
-
+                    Rc::get_mut(&mut r).unwrap().canonicalize_buffer();
                     old_root = r;
                 }
                 let new_root =
@@ -347,8 +343,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             return None;
         }
 
-        self.buffer.sort_by(|a, b| a.key().cmp(b.key()));
-        dedup_all_but_last_by(&mut self.buffer, |a, b| a.key() == b.key());
+        self.canonicalize_buffer();
         // TODO can we elide the VecDeque
         let mut new_nodes = self.flush(Range::everything(), once(op));
         // let mut new_nodes = self.flush(b, empty());
@@ -366,7 +361,15 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         K: Ord,
     {
         self.buffer.extend(ops);
-        self.buffer.sort_by(|a, b| a.key().cmp(b.key()))
+        self.canonicalize_buffer();
+    }
+
+    fn canonicalize_buffer(&mut self)
+    where
+        K: Ord,
+    {
+        self.buffer.sort_by(|a, b| a.key().cmp(b.key()));
+        dedup_all_but_last_by(&mut self.buffer, |a, b| a.key() == b.key());
     }
 
     fn flush(
@@ -1443,6 +1446,19 @@ mod test {
         list.insert(2139062143, 2139062143);
         list.insert(8192, 134217728);
         list.insert(905262389, 892679477);
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn cloned_nodes_dedup_buffer() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(16843009, 16843009);
+        list.insert(16843009, 1431655937);
+        list.insert(16843009, 1431655765);
+        list.insert(1442906369, 1431655765);
+        list.insert(16843009, 16843009);
+        list.insert(16843248, 1509987073);
+        assert_eq!(list.get(&16843009), Some(&16843009));
         insta::assert_snapshot!(list.output_dot());
     }
 }
