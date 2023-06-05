@@ -501,15 +501,15 @@ impl<K> From<K> for RangeBound<K> {
     }
 }
 
-pub fn map_builder<K>() -> KeyBuilder<K> {
+pub fn map_builder<K, M>() -> KeyBuilder<K, M> {
     KeyBuilder { keys: vec![] }
 }
 
-pub struct KeyBuilder<K> {
-    keys: Vec<Vec<RangeBound<K>>>,
+pub struct KeyBuilder<K, M> {
+    keys: Vec<(Vec<RangeBound<K>>, M)>,
 }
 
-impl<K> KeyBuilder<K>
+impl<K, M> KeyBuilder<K, M>
 where
     K: Clone,
 {
@@ -517,26 +517,26 @@ where
         self.keys.is_empty()
     }
 
-    pub fn start_new_map_with(&mut self, key: RangeBound<K>) -> &mut Self {
-        if let Some(prev) = self.keys.last_mut() {
+    pub fn start_new_map_with(&mut self, key: RangeBound<K>, meta: M) -> &mut Self {
+        if let Some((prev, _)) = self.keys.last_mut() {
             prev.push(key.clone())
         }
-        self.keys.push(vec![key]);
+        self.keys.push((vec![key], meta));
         self
     }
 
     #[track_caller]
     pub fn add_key_to_map(&mut self, key: RangeBound<K>) -> &mut Self {
-        self.keys.last_mut().unwrap().push(key);
+        self.keys.last_mut().unwrap().0.push(key);
         self
     }
 
-    pub fn finish_with<V>(mut self, key: RangeBound<K>) -> ValueBuilder<K, V> {
+    pub fn finish_with<V>(mut self, key: RangeBound<K>) -> ValueBuilder<K, V, M> {
         self.add_key_to_map(key);
         self.finish()
     }
 
-    pub fn finish<V>(self) -> ValueBuilder<K, V> {
+    pub fn finish<V>(self) -> ValueBuilder<K, V, M> {
         let num_maps = self.keys.len();
         ValueBuilder {
             keys: self.keys,
@@ -548,15 +548,15 @@ where
     }
 }
 
-pub struct ValueBuilder<K, V> {
-    keys: Vec<Vec<RangeBound<K>>>,
+pub struct ValueBuilder<K, V, M> {
+    keys: Vec<(Vec<RangeBound<K>>, M)>,
     values: Vec<Vec<V>>,
     current_values: usize,
     range_start: usize,
     range_end: usize,
 }
 
-impl<K, V> ValueBuilder<K, V>
+impl<K, V, M> ValueBuilder<K, V, M>
 where
     K: Ord + Clone,
     V: Clone,
@@ -565,7 +565,7 @@ where
         if self.current_values >= self.keys.len() {
             return None;
         }
-        let keys = &self.keys[self.current_values];
+        let keys = &self.keys[self.current_values].0;
         (self.range_end < keys.len()).then(|| {
             Range::new(
                 keys[self.range_start].as_ref(),
@@ -578,7 +578,7 @@ where
         if self.current_values >= self.keys.len() {
             return None;
         }
-        let keys = &self.keys[self.current_values];
+        let keys = &self.keys[self.current_values].0;
         (self.range_end + 1 < keys.len()).then(|| {
             Range::new(
                 keys[self.range_end].as_ref(),
@@ -595,7 +595,7 @@ where
         self.values[self.current_values]
             .extend((self.range_start..self.range_end).map(|_| value.clone()));
 
-        if self.range_end + 1 < self.keys[self.current_values].len() {
+        if self.range_end + 1 < self.keys[self.current_values].0.len() {
             self.range_start = self.range_end;
             self.range_end = self.range_start + 1;
         } else {
@@ -627,16 +627,16 @@ where
         debug_assert!(!first);
     }
 
-    pub fn finish(self) -> impl ExactSizeIterator<Item = DenseRangeMap<K, V>> {
+    pub fn finish(self) -> impl ExactSizeIterator<Item = (DenseRangeMap<K, V>, M)> {
         debug_assert_eq!(self.keys.len(), self.values.len());
-        zip_eq(self.keys, self.values).map(|(keys, values)| {
+        zip_eq(self.keys, self.values).map(|((keys, meta), values)| {
             debug_assert!(
                 (keys.len() == 0 && values.len() == 0) || (values.len() + 1 == keys.len()),
                 "keys: {}, vals: {}",
                 keys.len(),
                 values.len()
             );
-            DenseRangeMap { keys, values }
+            (DenseRangeMap { keys, values }, meta)
         })
     }
 }
@@ -797,7 +797,7 @@ mod test {
     fn builder() {
         let mut key_builder = map_builder();
         key_builder
-            .start_new_map_with(Includes(10))
+            .start_new_map_with(Includes(10), 1)
             .add_key_to_map(Includes(21))
             .add_key_to_map(Includes(100));
         let mut value_builder = key_builder.finish_with(Includes(1000));
@@ -807,14 +807,17 @@ mod test {
         let maps = value_builder.finish().collect_vec();
         assert_eq!(
             maps,
-            vec![dense_range_map!(
-                Includes(10),
-                101,
-                Includes(21),
-                202,
-                Includes(100),
-                3,
-                Includes(1000)
+            vec![(
+                dense_range_map!(
+                    Includes(10),
+                    101,
+                    Includes(21),
+                    202,
+                    Includes(100),
+                    3,
+                    Includes(1000)
+                ),
+                1
             )]
         );
     }
@@ -823,9 +826,9 @@ mod test {
     fn builder2() {
         let mut key_builder = map_builder();
         key_builder
-            .start_new_map_with(Includes(10))
+            .start_new_map_with(Includes(10), 2)
             .add_key_to_map(Includes(21))
-            .start_new_map_with(Includes(100));
+            .start_new_map_with(Includes(100), 3);
         let mut value_builder = key_builder.finish_with(Includes(1000));
         value_builder.add_value(101);
         value_builder.add_value(202);
@@ -834,8 +837,11 @@ mod test {
         assert_eq!(
             maps,
             vec![
-                dense_range_map!(Includes(10), 101, Includes(21), 202, Includes(100)),
-                dense_range_map!(Includes(100), 3, Includes(1000))
+                (
+                    dense_range_map!(Includes(10), 101, Includes(21), 202, Includes(100)),
+                    2
+                ),
+                (dense_range_map!(Includes(100), 3, Includes(1000)), 3)
             ]
         );
     }
@@ -844,10 +850,10 @@ mod test {
     fn builder_incremental() {
         let mut key_builder = map_builder();
         key_builder
-            .start_new_map_with(Includes(10))
+            .start_new_map_with(Includes(10), true)
             .add_key_to_map(Includes(21))
             .add_key_to_map(Includes(55))
-            .start_new_map_with(Includes(100))
+            .start_new_map_with(Includes(100), false)
             .add_key_to_map(Includes(107));
         let mut value_builder = key_builder.finish_with(Includes(1000));
         assert_eq!(
@@ -907,16 +913,22 @@ mod test {
         assert_eq!(
             maps,
             vec![
-                dense_range_map!(
-                    Includes(10),
-                    1,
-                    Includes(21),
-                    1,
-                    Includes(55),
-                    2,
-                    Includes(100)
+                (
+                    dense_range_map!(
+                        Includes(10),
+                        1,
+                        Includes(21),
+                        1,
+                        Includes(55),
+                        2,
+                        Includes(100)
+                    ),
+                    true
                 ),
-                dense_range_map!(Includes(100), 3, Includes(107), 444, Includes(1000))
+                (
+                    dense_range_map!(Includes(100), 3, Includes(107), 444, Includes(1000)),
+                    false
+                )
             ]
         );
     }
@@ -925,10 +937,10 @@ mod test {
     fn builder_ranged() {
         let mut key_builder = map_builder();
         key_builder
-            .start_new_map_with(Includes(10))
+            .start_new_map_with(Includes(10), false)
             .add_key_to_map(Includes(21))
             .add_key_to_map(Includes(55))
-            .start_new_map_with(Includes(100))
+            .start_new_map_with(Includes(100), true)
             .add_key_to_map(Includes(107));
         let mut value_builder = key_builder.finish_with(Includes(1000));
         assert_eq!(
@@ -977,16 +989,22 @@ mod test {
         assert_eq!(
             maps,
             vec![
-                dense_range_map!(
-                    Includes(10),
-                    1,
-                    Includes(21),
-                    1,
-                    Includes(55),
-                    2,
-                    Includes(100)
+                (
+                    dense_range_map!(
+                        Includes(10),
+                        1,
+                        Includes(21),
+                        1,
+                        Includes(55),
+                        2,
+                        Includes(100)
+                    ),
+                    false
                 ),
-                dense_range_map!(Includes(100), 3, Includes(107), 444, Includes(1000))
+                (
+                    dense_range_map!(Includes(100), 3, Includes(107), 444, Includes(1000)),
+                    true
+                )
             ]
         );
     }
