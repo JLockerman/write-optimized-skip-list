@@ -178,10 +178,11 @@ impl<K: 'static, V: 'static> List<K, V> {
                 let (old_height, mut old_root) = replace(root, Nothing).to_node();
                 if old_height > 0 {
                     let mut r = Rc::downcast::<UpperNode<K, V>>(old_root).unwrap();
-                    Rc::get_mut(&mut r)
-                        .unwrap()
-                        .buffer
-                        .sort_by(|a, b| a.key().cmp(b.key()));
+                    let buffer = &mut Rc::get_mut(&mut r).unwrap().buffer;
+
+                    buffer.sort_by(|a, b| a.key().cmp(b.key()));
+                    dedup_all_but_last_by(buffer, |a, b| a.key() == b.key());
+
                     old_root = r;
                 }
                 let new_root =
@@ -1364,6 +1365,7 @@ mod test {
         list.insert(1, 5900341);
         insta::assert_snapshot!(list.output_dot());
     }
+
     #[test]
     fn old_roots_get_sorted() {
         let mut list: super::List<u32, u32> = super::List::new(3);
@@ -1374,5 +1376,18 @@ mod test {
         list.insert(557990526, 656877402);
         assert_eq!(list.get(&875836468), Some(&369112372));
         insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn old_roots_get_deduped() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(0, 0);
+        list.insert(0, 1107296256);
+        list.insert(1111638594, 52);
+        list.insert(5632, 4294508593);
+        list.insert(2122219134, 16962);
+        insta::assert_snapshot!(list.output_dot());
+        assert_eq!(list.get(&0), Some(&1107296256));
+
     }
 }
