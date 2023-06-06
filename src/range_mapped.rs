@@ -460,7 +460,10 @@ where
             .leads()
             .merge_join_by(buffer.iter(), |k, op| k.cmp(&Includes(op.key())));
 
-        if self.entries.sub_entries(Range::everything()).is_empty() {
+        // if this is the first node in a new row we need to have a NegInf key at the front
+        // TODO this seems like a pretty bad heuristic, what's a better way to determine this?
+        if self.entries.sub_entries(Range::everything()).is_empty() && range.contains_bound(NegInf)
+        {
             key_builder.start_new_map_with(NegInf, true);
         }
 
@@ -585,14 +588,17 @@ where
             value_builder.add_value_for_range(range, Rc::new(new_node));
             return;
         }
-
+        // println!("{}", self.height);
         let replacement_nodes = self.flush(range, new_ops);
+        // println!("{}", Self::out_put_dot_for_iter(&replacement_nodes));
         for node in replacement_nodes {
             // TODO is the clamp needed?
             let node_range = node.entries.range().clamp_to(range);
+            // println!("node: {node_range:?}");
             // let node_range = node.entries.range();
             value_builder.add_value_for_range(node_range, node.clone());
         }
+        // println!("/{}", self.height);
     }
 
     fn apply_ops_to_children(
@@ -612,7 +618,18 @@ where
             }
         });
 
-        for (mut child_range, child_node) in child_ranges {
+        // for (child_range, _) in sub_entries.iter().coalesce(|(ka, va), (kb, vb)| {
+        //     if Rc::ptr_eq(va, vb) {
+        //         Ok((Range::merge(ka, kb), va))
+        //     } else {
+        //         Err(((ka, va), (kb, vb)))
+        //     }
+        // }) {
+        //     println!("child: {:?}", child_range.clamp_to(range));
+        // }
+
+        for (child_range, child_node) in child_ranges {
+            let child_range = child_range.clamp_to(range);
             // let end = buffer.partition_point(|op| *child_range.end() > &op.key());
             let end = buffer.partition_point(|op| child_range.contains(&op.key()));
             if end == 0 {
@@ -620,12 +637,8 @@ where
                 continue;
             }
 
-            if child_range.end() > range.end() {
-                child_range.contract_end(*range.end())
-            }
-
             let child = child_node.as_upper();
-            child.add_ops(child_range.clamp_to(range), buffer.drain(..end), value_builder);
+            child.add_ops(child_range, buffer.drain(..end), value_builder);
         }
     }
 }
@@ -1517,6 +1530,20 @@ mod test {
         list.insert(3170893824, 1111638594);
         list.insert(876757570, 52);
         list.insert(3242345026, 4342324);
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn only_add_neginf_to_first_logical_node() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(3419130156, 559546571);
+        list.insert(0, 0);
+        list.insert(0, 0);
+        list.insert(1094795585, 1094795585);
+        list.insert(1094795585, 4276545);
+        list.insert(4, 0);
+        list.insert(0, 0);
+        list.insert(0, 1515847680);
         insta::assert_snapshot!(list.output_dot());
     }
 }
