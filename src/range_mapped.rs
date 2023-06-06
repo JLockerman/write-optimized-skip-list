@@ -421,7 +421,7 @@ where
         let mut value_builder = key_builder.finish_with(range.end().cloned());
 
         if self.height == 1 {
-            self.apply_ops_to_leaves(sub_entries, buffer, &mut value_builder);
+            self.apply_ops_to_leaves(range, sub_entries, buffer, &mut value_builder);
         } else if sub_entries.is_empty() {
             let temp_child: Self = Self::empty(self.b, self.height - 1);
             temp_child.add_ops(range, buffer.into_iter(), &mut value_builder);
@@ -510,6 +510,7 @@ where
 
     fn apply_ops_to_leaves(
         &self,
+        range: Range<&K>,
         sub_entries: SubEntries<K, Node>,
         buffer: VecDeque<Op<K, V>>,
         value_builder: &mut ValueBuilder<K, Node, bool>,
@@ -531,7 +532,7 @@ where
             })
             .flat_map(|(child_range, node)| {
                 <_ as AsNode<K, V>>::as_leaf(node)
-                    .sub_entries(child_range)
+                    .sub_entries(child_range.clamp_to(range))
                     .iter()
             })
             .merge_join_by(buffer, |(k, _), op| k.cmp(op.key()))
@@ -1544,6 +1545,21 @@ mod test {
         list.insert(4, 0);
         list.insert(0, 0);
         list.insert(0, 1515847680);
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn obey_logical_leaves_when_balancing() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(2122219060, 0);
+        list.insert(0, 0);
+        list.insert(0, 0);
+        list.insert(1073741824, 4278202368);
+        list.insert(0, 0);
+        list.insert(656894976, 23895898);
+        list.insert(11520, 16748800);
+        list.insert(0, 0);
+        list.insert(0, 805322752);
         insta::assert_snapshot!(list.output_dot());
     }
 }
