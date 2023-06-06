@@ -78,7 +78,11 @@ enum GetResult<'a, K, V> {
     Lower(&'a LeafNode<K, V>),
 }
 
-impl<K: 'static, V: 'static> List<K, V> {
+impl<K: 'static, V: 'static> List<K, V>
+where
+    K: std::fmt::Debug,
+    V: std::fmt::Debug,
+{
     #[allow(dead_code)]
     fn from_upper(root: impl Into<Root<K, V>>) -> Self {
         Self {
@@ -189,7 +193,11 @@ impl<K: 'static, V: 'static> List<K, V> {
     }
 }
 
-impl<K: 'static, V: 'static> UpperNode<K, V> {
+impl<K: 'static, V: 'static> UpperNode<K, V>
+where
+    K: std::fmt::Debug,
+    V: std::fmt::Debug,
+{
     fn empty(b: u32, height: Height) -> Self {
         Self {
             height,
@@ -247,7 +255,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             b: self.b,
             starts_with_lead: true,
             buffer: self.sub_buffer(range).to_vec(),
-            entries: self.entries.sub_entries(range).0.cloned(),
+            entries: self.entries.sub_entries(range).cloned(),
         }
     }
 
@@ -328,7 +336,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         if range.is_everything() {
             return self.buffer.len() + self.entries.len();
         }
-        self.sub_buffer(range).len() + self.entries.sub_entries(range).0.len()
+        self.sub_buffer(range).len() + self.entries.sub_entries(range).len()
     }
 
     fn add_op_to_root(&mut self, op: Op<K, V>) -> Option<Rc<Self>>
@@ -404,7 +412,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         V: Clone,
     {
         let buffer: VecDeque<_> = ops.collect();
-        let (sub_entries, (_before, _after)) = self.entries.sub_entries(range);
+        let sub_entries = self.entries.sub_entries(range);
 
         let mut key_builder = map_builder();
 
@@ -452,7 +460,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             .leads()
             .merge_join_by(buffer.iter(), |k, op| k.cmp(&Includes(op.key())));
 
-        if self.entries.sub_entries(Range::everything()).0.is_empty() {
+        if self.entries.sub_entries(Range::everything()).is_empty() {
             key_builder.start_new_map_with(NegInf, true);
         }
 
@@ -462,9 +470,11 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             if let (false, Left(k) | Both(k, Insert(..))) = (seen_first_pivot, &pop) {
                 seen_first_pivot = true;
                 // if this is the first pivot in the node then it may be a lead pivot
-                if key_builder.is_empty() || self.starts_with_lead {
+                if range.contains_bound(*k) && (key_builder.is_empty() || self.starts_with_lead) {
                     key_builder.start_new_map_with(k.cloned(), self.starts_with_lead);
                     continue;
+                } else if key_builder.is_empty() {
+                    continue; // TODO
                 }
             } else if let Right(Insert(k, _, height)) = pop {
                 if *height > self.height {
@@ -580,6 +590,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         for node in replacement_nodes {
             // TODO is the clamp needed?
             let node_range = node.entries.range().clamp_to(range);
+            // let node_range = node.entries.range();
             value_builder.add_value_for_range(node_range, node.clone());
         }
     }
@@ -614,7 +625,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             }
 
             let child = child_node.as_upper();
-            child.add_ops(child_range, buffer.drain(..end), value_builder);
+            child.add_ops(child_range.clamp_to(range), buffer.drain(..end), value_builder);
         }
     }
 }
@@ -752,6 +763,39 @@ impl<K, V> List<K, V> {
 }
 
 impl<K: 'static, V: 'static> UpperNode<K, V> {
+    pub fn out_put_dot_for_iter<'a, P>(iter: impl IntoIterator<Item = &'a P>) -> String
+    where
+        P: AsRef<Self> + 'static,
+        K: std::fmt::Debug + Ord,
+        V: std::fmt::Debug,
+    {
+        use std::fmt::Write;
+
+        let mut out = String::new();
+        writeln!(
+            out,
+            "digraph {{\n  \
+            node [shape=plaintext];\n  \
+            rankdir=\"TB\";\n  \
+            ranksep=\"0.02\";\n  \
+            splines=polyline;\n"
+        )
+        .unwrap();
+
+        let mut edges = String::new();
+        let mut map = HashMap::new();
+
+        for node in iter {
+            node.as_ref().output_dot(&mut out, &mut edges, &mut map);
+        }
+
+        out.push_str(&edges);
+
+        writeln!(out, "}}").unwrap();
+
+        out
+    }
+
     pub fn output_dot(
         &self,
         out: &mut String,
@@ -1459,6 +1503,20 @@ mod test {
         list.insert(16843009, 16843009);
         list.insert(16843248, 1509987073);
         assert_eq!(list.get(&16843009), Some(&16843009));
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn child_flushes_stay_in_range() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(3419130826, 3420980);
+        list.insert(0, 0);
+        list.insert(0, 0);
+        list.insert(0, 0);
+        list.insert(0, 873381631);
+        list.insert(3170893824, 1111638594);
+        list.insert(876757570, 52);
+        list.insert(3242345026, 4342324);
         insta::assert_snapshot!(list.output_dot());
     }
 }
