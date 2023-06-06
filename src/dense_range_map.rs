@@ -15,6 +15,7 @@ pub struct DenseRangeMap<K, V> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SubEntries<'e, K, V> {
+    bound: Range<&'e K>,
     keys: &'e [RangeBound<K>],
     values: &'e [V],
 }
@@ -40,37 +41,33 @@ impl<K, V> DenseRangeMap<K, V> {
         }
     }
 
-    pub fn get_bounded(&self, key: &K, bound: Range<&K>) -> Option<(Range<&K>, &V)>
+    pub fn get_bounded<'a>(&'a self, key: &K, bound: Range<&'a K>) -> Option<(Range<&'a K>, &'a V)>
     where
         K: Ord,
     {
-        self.sub_entries(bound).0.get(key)
+        self.sub_entries(bound).get(key)
     }
 
-    pub fn sub_entries(
-        &self,
-        bound: Range<&K>,
-    ) -> (
-        SubEntries<'_, K, V>,
-        (Option<RangeBound<&K>>, Option<RangeBound<&K>>),
-    )
+    pub fn sub_entries<'a>(&'a self, bound: Range<&'a K>) -> SubEntries<'a, K, V>
     where
         K: Ord,
     {
         let empty = SubEntries {
+            bound,
             keys: &[],
             values: &[],
         };
         if bound.is_everything() {
             let everything = SubEntries {
+                bound,
                 keys: &self.keys,
                 values: &self.values,
             };
-            return (everything, (None, None));
+            return everything;
         }
 
         if self.keys.is_empty() {
-            return (empty, (None, None));
+            return empty;
         }
 
         let Range { start, end } = bound;
@@ -87,16 +84,11 @@ impl<K, V> DenseRangeMap<K, V> {
         // 2. find the smallest entry > end
         let end_idx = possible_ends.partition_point(|k| k.as_ref() < end);
 
-        let subrange = SubEntries {
+        SubEntries {
+            bound,
             keys: &possible_ends[..=end_idx],
             values: &possible_values[..end_idx],
-        };
-
-        // TODO this is dumb
-        let before = subrange.keys.first().map(RangeBound::as_ref);
-        let after = subrange.keys.last().map(RangeBound::as_ref);
-
-        (subrange, (before, after))
+        }
 
         // let before_keys = &self.keys[..=start_idx];
         // let before_values = &self.values[..start_idx];
@@ -127,7 +119,7 @@ impl<K, V> DenseRangeMap<K, V> {
         // (sub_range, (before, after))
     }
 
-    pub fn get(&self, key: &K) -> Option<(Range<&K>, &V)>
+    pub fn get<'a>(&'a self, key: &K) -> Option<(Range<&'a K>, &'a V)>
     where
         K: Ord,
     {
@@ -149,7 +141,7 @@ impl<K, V> DenseRangeMap<K, V> {
     where
         K: Ord,
     {
-        self.sub_entries(Range::everything()).0.iter()
+        self.sub_entries(Range::everything()).iter()
     }
 }
 
@@ -173,9 +165,12 @@ impl<'e, K, V> SubEntries<'e, K, V> {
 
     pub fn get(&self, key: &K) -> Option<(Range<&'e K>, &'e V)>
     where
-        K: PartialOrd,
+        K: Ord,
     {
         if self.is_empty() {
+            return None;
+        }
+        if !self.bound.contains(&key) {
             return None;
         }
         // the entries are logically a list of (low_bound, value, upper_bound)
@@ -185,20 +180,35 @@ impl<'e, K, V> SubEntries<'e, K, V> {
             return None;
         }
 
-        let lower = self.keys[idx - 1].as_ref();
-        let upper = self.keys[idx].as_ref();
+        let mut lower = self.keys[idx - 1].as_ref();
+        let mut upper = self.keys[idx].as_ref();
         let val = &self.values[idx - 1];
+
+        if lower < self.bound.start {
+            lower = self.bound.start
+        }
+
+        if upper > self.bound.end {
+            upper = self.bound.end
+        }
 
         Some((Range::new(lower, upper), val))
     }
 
-    pub fn keys(&self) -> impl Iterator<Item = RangeBound<&'e K>> {
-        self.keys.iter().map(RangeBound::as_ref)
-    }
+    // pub fn keys(&self) -> impl Iterator<Item = RangeBound<&'e K>> {
+    //     self.keys.iter().map(RangeBound::as_ref)
+    // }
 
-    pub fn leads(&self) -> impl Iterator<Item = RangeBound<&'e K>> {
+    pub fn leads(&self) -> impl Iterator<Item = RangeBound<&'e K>> + '_ {
         let end = self.keys.len().saturating_sub(1);
-        return self.keys[..end].iter().map(RangeBound::as_ref);
+        (0..end).map(move |i| {
+            if i == 0 {
+                self.bound.start
+            } else {
+                self.keys[i].as_ref()
+            }
+        })
+        // return self.keys[..end].iter().map(RangeBound::as_ref);
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Range<&'e K>, &'e V)> {
@@ -315,6 +325,13 @@ impl<K> Range<K> {
         self.start <= bound.start && self.end >= bound.end
     }
 
+    pub fn contains_bound(self, bound: RangeBound<K>) -> bool
+    where
+        K: Ord,
+    {
+        self.start <= bound && self.end > bound
+    }
+
     pub fn contract_start(&mut self, start: RangeBound<K>)
     where
         K: Ord,
@@ -351,6 +368,7 @@ impl<K> Range<K> {
         if self.end > bound.end {
             self.end = bound.end
         }
+        assert!(self.start < self.end);
         self
     }
 }
@@ -517,8 +535,14 @@ where
         self.keys.is_empty()
     }
 
-    pub fn start_new_map_with(&mut self, key: RangeBound<K>, meta: M) -> &mut Self {
+    pub fn start_new_map_with(&mut self, key: RangeBound<K>, meta: M) -> &mut Self
+    where
+        K: Ord,
+    {
         if let Some((prev, _)) = self.keys.last_mut() {
+            if let Some(last) = prev.last() {
+                debug_assert!(last < &key);
+            }
             prev.push(key.clone())
         }
         self.keys.push((vec![key], meta));
@@ -526,12 +550,21 @@ where
     }
 
     #[track_caller]
-    pub fn add_key_to_map(&mut self, key: RangeBound<K>) -> &mut Self {
+    pub fn add_key_to_map(&mut self, key: RangeBound<K>) -> &mut Self
+    where
+        K: Ord,
+    {
+        if let Some(last) = self.keys.last_mut().unwrap().0.last() {
+            debug_assert!(last < &key);
+        }
         self.keys.last_mut().unwrap().0.push(key);
         self
     }
 
-    pub fn finish_with<V>(mut self, key: RangeBound<K>) -> ValueBuilder<K, V, M> {
+    pub fn finish_with<V>(mut self, key: RangeBound<K>) -> ValueBuilder<K, V, M>
+    where
+        K: Ord,
+    {
         self.add_key_to_map(key);
         self.finish()
     }
@@ -674,8 +707,9 @@ mod test {
     }
 
     macro_rules! sub_entries {
-        ( $first_key:expr $(, $val:expr, $key:expr)*  ) => {
+        ( [$start: expr, $end:expr] $first_key:expr $(, $val:expr, $key:expr)*  ) => {
             SubEntries {
+                bound: ($start, $end).into(),
                 keys: {
                     let keys = &[ $first_key $(, $key )* ];
                     assert!(keys.windows(2).all(|w| w[0] < w[1]));
@@ -772,23 +806,41 @@ mod test {
     fn sub_entires() {
         let map = dense_range_map!(NegInf, 11, Includes(10), 2, Includes(57), 333, PosInf);
 
-        let (a, (b, c)) = map.sub_entries((NegInf, Includes(&10)).into());
-        assert_eq!(a, sub_entries!(NegInf, 11, Includes(10)));
-        assert_eq!(b, Some(NegInf));
-        assert_eq!(c, Some(Includes(&10)));
+        let a = map.sub_entries((NegInf, Includes(&10)).into());
+        assert_eq!(a, sub_entries!([NegInf, Includes(&10)] NegInf, 11, Includes(10)));
 
         let first_range = Range::new(NegInf, Includes(&10));
         for i in 0..10 {
             assert_eq!(a.get(&i), Some((first_range, &11)));
         }
 
-        let second_range = Range::new(Includes(&10), Includes(&57));
         for i in 10..57 {
             assert_eq!(a.get(&i), None);
         }
 
-        let third_range = Range::new(Includes(&57), PosInf);
         for i in 57..202 {
+            assert_eq!(a.get(&i), None);
+        }
+    }
+
+    #[test]
+    fn sub_entires2() {
+        let map = dense_range_map!(NegInf, 11, Includes(10), 2, Includes(57), 333, PosInf);
+
+        let a = map.sub_entries((&10, &58).into());
+        assert_eq!(a, sub_entries!([&10, &58] Includes(10), 2, Includes(57), 333, PosInf));
+
+        for i in 0..10 {
+            assert_eq!(a.get(&i), None);
+        }
+
+        for i in 10..57 {
+            assert_eq!(a.get(&i), Some(((&10, &57).into(), &2)));
+        }
+
+        assert_eq!(a.get(&57), Some(((&57, &58).into(), &333)));
+
+        for i in 58..202 {
             assert_eq!(a.get(&i), None);
         }
     }
