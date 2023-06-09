@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 
 #[cfg(FALSE)]
 pub mod naive;

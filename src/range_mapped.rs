@@ -1,5 +1,6 @@
 use std::{
     any::Any,
+    cell::RefCell,
     collections::{HashMap, VecDeque},
     hash::{Hash, Hasher},
     iter::once,
@@ -20,6 +21,85 @@ use crate::{
     },
     merge_dedup::{dedup_all_but_last_by, merge_dedup},
 };
+
+thread_local! {
+    static COUNTERS: Counters = Counters::new();
+}
+
+struct Counters(RefCell<CountersInner>);
+
+#[derive(Default)]
+struct CountersInner {
+    depth: u64,
+    new_nodes: usize,
+    new_nodes_hist: HashMap<usize, u64>,
+    node_sizes: HashMap<usize, u64>,
+    total_inserts: u64,
+    total_new_nodes: u64,
+}
+
+impl Counters {
+    fn new() -> Self {
+        Self(RefCell::new(CountersInner::default()))
+    }
+
+    fn reset(&self) {
+        let mut this = self.0.borrow_mut();
+        *this = CountersInner::default();
+    }
+
+    fn inc_depth(&self) {
+        let mut this = self.0.borrow_mut();
+        this.depth += 1;
+    }
+
+    fn dec_depth(&self) -> u64 {
+        let mut this = self.0.borrow_mut();
+        this.depth -= 1;
+        this.depth
+    }
+
+    fn new_node(&self, size: usize) {
+        let mut this = self.0.borrow_mut();
+        this.new_nodes += 1;
+        *this.node_sizes.entry(size).or_insert(0) += 1;
+    }
+
+    fn finish_insert(&self) {
+        let mut this = self.0.borrow_mut();
+        let new = this.new_nodes;
+        this.total_new_nodes += new as u64;
+        *this.new_nodes_hist.entry(new).or_insert(0) += 1;
+        this.new_nodes = 0;
+        this.total_inserts += 1;
+    }
+
+    fn counts(&self) -> CountersInner {
+        let mut this = self.0.borrow_mut();
+        replace(&mut *this, CountersInner::default())
+    }
+}
+
+impl CountersInner {
+    fn print(self) {
+        let new_nodes = self
+            .new_nodes_hist
+            .into_iter()
+            .sorted_unstable_by_key(|(num, _)| *num)
+            .collect_vec();
+        println!("new_nodes/insert: {new_nodes:?}");
+
+        let node_sizes = self
+            .node_sizes
+            .into_iter()
+            .sorted_unstable_by_key(|(num, _)| *num)
+            .collect_vec();
+        println!("sizes/insert: {node_sizes:?}");
+
+        println!("inserts {}, nodes {}", self.total_inserts, self.total_new_nodes);
+        println!("avg {} nodes/insert ", self.total_new_nodes as f64 / self.total_inserts as f64);
+    }
+}
 
 #[derive(Debug)]
 pub struct List<K, V> {
@@ -190,6 +270,7 @@ where
                 *root = Node(new_root);
             }
         }
+        COUNTERS.with(|c| c.finish_insert());
     }
 }
 
@@ -209,6 +290,7 @@ where
     }
 
     fn new_root(b: u32, key: K, val: V, height: Height) -> Rc<Self> {
+        // COUNTERS.with(|c| c.new_node(1));
         Rc::new(Self {
             height,
             b,
@@ -226,6 +308,7 @@ where
         (mut old_height, mut old_root): (Height, Node),
     ) -> Rc<Self> {
         while old_height < height - 1 {
+            COUNTERS.with(|c| c.new_node(1));
             old_height += 1;
             old_root = Rc::new(Self {
                 height: old_height,
@@ -235,7 +318,7 @@ where
                 entries: (Range::everything(), old_root).into(),
             }) as Node
         }
-
+        // COUNTERS.with(|c| c.new_node(2));
         Rc::new(Self {
             height,
             b,
@@ -370,6 +453,7 @@ where
     {
         self.buffer.extend(ops);
         self.canonicalize_buffer();
+        COUNTERS.with(|c| c.new_node(self.slots_used(Range::everything())))
     }
 
     fn canonicalize_buffer(&mut self)
@@ -420,6 +504,8 @@ where
 
         let mut value_builder = key_builder.finish_with(range.end().cloned());
 
+        COUNTERS.with(|c| c.inc_depth());
+
         if self.height == 1 {
             self.apply_ops_to_leaves(range, sub_entries, buffer, &mut value_builder);
         } else if sub_entries.is_empty() {
@@ -429,9 +515,14 @@ where
             Self::apply_ops_to_children(range, sub_entries, buffer, &mut value_builder);
         }
 
+        let current_depth = COUNTERS.with(|c| c.dec_depth());
+
         value_builder
             .finish()
             .map(|(entries, starts_with_lead)| {
+                if current_depth > 0 {
+                    COUNTERS.with(|c| c.new_node(entries.len()));
+                }
                 Rc::new(Self {
                     height: self.height,
                     b: self.b,
@@ -564,6 +655,7 @@ where
                 }
             }
 
+            COUNTERS.with(|c| c.new_node(current_entries.len()));
             value_builder.add_value(LeafNode::new(current_entries) as Node);
         }
 
@@ -646,6 +738,7 @@ where
 
 impl<K, V> LeafNode<K, V> {
     fn new_root(k: K, v: V) -> Rc<Self> {
+        // COUNTERS.with(|c| c.new_node(1));
         Self {
             entries: vec![(k, v)],
         }
@@ -846,14 +939,15 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         .unwrap();
 
         writeln!(out, "    <TR><TD>").unwrap();
-        for (i, buffered) in self.buffer.iter().enumerate() {
-            if i == 0 {
-                write!(out, "      ").unwrap()
-            } else if i > 0 {
-                write!(out, "{}", if i % 5 == 0 { "<BR/> " } else { " " }).unwrap()
-            }
-            write!(out, "{buffered:?}").unwrap()
-        }
+        write!(out, "      {}", self.buffer.len()).unwrap();
+        // for (i, buffered) in self.buffer.iter().enumerate() {
+        //     if i == 0 {
+        //         write!(out, "      ").unwrap()
+        //     } else if i > 0 {
+        //         write!(out, "{}", if i % 5 == 0 { "<BR/> " } else { " " }).unwrap()
+        //     }
+        //     write!(out, "{buffered:?}").unwrap()
+        // }
         writeln!(out, "    </TD></TR>").unwrap();
 
         writeln!(out, "    <TR><TD>").unwrap();
@@ -865,7 +959,8 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
 
             let (start, end) = range.inner();
             end_range = Some(end);
-            writeln!(out, "          <TD PORT=\"p{i}\">{start:?}</TD>").unwrap();
+            // writeln!(out, "          <TD PORT=\"p{i}\">{start:?}</TD>").unwrap();
+            writeln!(out, "          <TD PORT=\"p{i}\"> </TD>").unwrap();
             let child = if self.height == 1 {
                 <_ as AsNode<K, V>>::as_leaf(child) as *const _ as *const ()
             } else {
@@ -875,7 +970,9 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             writeln!(edges, "  n{ptr:?}:p{i}:s -> n{child:?}:n [weight=0.01]").unwrap();
         }
         if let Some(end) = end_range {
-            writeln!(out, "          <TD>{end:?}</TD>").unwrap();
+            // writeln!(out, "          <TD>{end:?}</TD>").unwrap();
+            let count = self.entries.len();
+            writeln!(out, "          <TD>{count:?}</TD>").unwrap();
             writeln!(out, "        </TR>\n      {TABLE_END}").unwrap();
         }
         writeln!(out, "    </TD></TR>\n  {TABLE_END}\n>]\n").unwrap();
@@ -910,25 +1007,26 @@ impl<K, V> LeafNode<K, V> {
         .unwrap();
 
         let mut first = true;
-        for (k, _) in &self.entries {
-            if first {
-                writeln!(out, "    <TR>").unwrap();
-            }
-            first = false;
-            writeln!(out, "      <TD>{k:?}</TD>").unwrap();
-        }
-        if !first {
-            writeln!(out, "    </TR>").unwrap();
-            writeln!(out, "    <TR>").unwrap();
-        }
-        for (_, v) in &self.entries {
-            writeln!(out, "      <TD>{v:?}</TD>").unwrap();
-        }
-        if !first {
-            writeln!(out, "    </TR>").unwrap();
-        } else {
-            writeln!(out, "    <TR><TD> ∅ </TD></TR>").unwrap();
-        }
+        // for (k, _) in &self.entries {
+        //     if first {
+        //         writeln!(out, "    <TR>").unwrap();
+        //     }
+        //     first = false;
+        //     writeln!(out, "      <TD>{k:?}</TD>").unwrap();
+        // }
+        // if !first {
+        //     writeln!(out, "    </TR>").unwrap();
+        //     writeln!(out, "    <TR>").unwrap();
+        // }
+        // for (_, v) in &self.entries {
+        //     writeln!(out, "      <TD>{v:?}</TD>").unwrap();
+        // }
+        // if !first {
+        //     writeln!(out, "    </TR>").unwrap();
+        // } else {
+        //     writeln!(out, "    <TR><TD> ∅ </TD></TR>").unwrap();
+        // }
+        writeln!(out, "    <TR><TD> {} </TD></TR>", self.entries.len()).unwrap();
         writeln!(out, "  {TABLE_END}\n>]\n").unwrap();
     }
 
@@ -1037,7 +1135,7 @@ mod test {
 
     use RangeBound::{NegInf, PosInf};
 
-    use super::LeafNode;
+    use super::{Counters, LeafNode, COUNTERS};
 
     macro_rules! Leaf {
         ($($key:expr => $val:expr),* $(,)?) => {
@@ -1561,5 +1659,128 @@ mod test {
         list.insert(0, 0);
         list.insert(0, 805322752);
         insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn random_inserts_128() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(128);
+        for _ in 0..1_000_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn ordered_inserts_128() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(128);
+        for i in 0..1_000_000 {
+            list.insert(i, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn random_inserts_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(1024);
+        for _ in 0..10_000_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn random_inserts_1000() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(1000);
+        for _ in 0..10_000_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn random_inserts_1500() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(1500);
+        for _ in 0..10_000_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn random_inserts_10000() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(10000);
+        for _ in 0..10_000_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn ordered_inserts_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(1024);
+        for i in 0..10_000_000 {
+            list.insert(i, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn ordered_inserts_1000() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(1000);
+        for i in 0..10_000_000 {
+            list.insert(i, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn ordered_inserts_10000() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(10_000);
+        for i in 0..10_000_000 {
+            list.insert(i, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn small_random_inserts() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(64);
+        for _ in 0..3_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        // counts.print();
+        println!("{}", list.output_dot());
+    }
+
+    #[test]
+    fn small_ordered_inserts() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(64);
+        for i in 0..3_000 {
+            list.insert(i, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        // counts.print();
+        println!("{}", list.output_dot());
     }
 }
