@@ -1,3 +1,5 @@
+#![allow(private_in_public)]
+
 use std::{
     cmp::Ordering,
     ops::{Bound, Index, RangeBounds},
@@ -549,7 +551,6 @@ where
         self
     }
 
-    #[track_caller]
     pub fn add_key_to_map(&mut self, key: RangeBound<K>) -> &mut Self
     where
         K: Ord,

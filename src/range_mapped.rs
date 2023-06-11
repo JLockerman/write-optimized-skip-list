@@ -96,8 +96,15 @@ impl CountersInner {
             .collect_vec();
         println!("sizes/insert: {node_sizes:?}");
 
-        println!("inserts {}, nodes {}", self.total_inserts, self.total_new_nodes);
-        println!("avg {} nodes/insert ", self.total_new_nodes as f64 / self.total_inserts as f64);
+        println!(
+            "inserts {}, nodes {}",
+            self.total_inserts, self.total_new_nodes
+        );
+        println!(
+            "avg {} nodes/insert\navg {} insert/node\n",
+            self.total_new_nodes as f64 / self.total_inserts as f64,
+            self.total_inserts as f64 / self.total_new_nodes as f64,
+        );
     }
 }
 
@@ -106,6 +113,7 @@ pub struct List<K, V> {
     b: u32,
     distribution: Bernoulli,
     root: Root<K, V>,
+    flush_policy: FlushPolicy,
 }
 
 #[derive(Debug)]
@@ -133,8 +141,15 @@ struct UpperNode<K, V> {
     height: Height,
     b: u32,
     starts_with_lead: bool,
+    flush_policy: FlushPolicy,
     buffer: Vec<Op<K, V>>,
     entries: DenseRangeMap<K, Node>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum FlushPolicy {
+    Everything,
+    FirstRun,
 }
 
 #[derive(Debug, Clone)]
@@ -169,6 +184,7 @@ where
             b: 0,
             distribution: Bernoulli::new(1.0 / (2 as f64).sqrt()).unwrap(),
             root: root.into(),
+            flush_policy: FlushPolicy::Everything,
         }
     }
 
@@ -178,6 +194,17 @@ where
             b,
             // TODO allow changing eplison (currently always 0.5)
             distribution: Bernoulli::new(1.0 / (b as f64).sqrt()).unwrap(),
+            flush_policy: FlushPolicy::Everything,
+        }
+    }
+
+    pub fn with_strategy(b: u32, flush_policy: FlushPolicy) -> Self {
+        Self {
+            root: Root::Nothing,
+            b,
+            // TODO allow changing eplison (currently always 0.5)
+            distribution: Bernoulli::new(1.0 / (b as f64).sqrt()).unwrap(),
+            flush_policy,
         }
     }
 
@@ -242,7 +269,13 @@ where
         match &mut self.root {
             root @ Nothing => {
                 *root = if height > 0 {
-                    Node(UpperNode::new_root(self.b, key, val, height))
+                    Node(UpperNode::new_root(
+                        self.b,
+                        key,
+                        val,
+                        height,
+                        self.flush_policy,
+                    ))
                 } else {
                     Leaf(LeafNode::new_root(key, val))
                 }
@@ -265,8 +298,14 @@ where
                     Rc::get_mut(&mut r).unwrap().canonicalize_buffer();
                     old_root = r;
                 }
-                let new_root =
-                    UpperNode::new_level(self.b, key, val, height, (old_height, old_root));
+                let new_root = UpperNode::new_level(
+                    self.b,
+                    key,
+                    val,
+                    height,
+                    self.flush_policy,
+                    (old_height, old_root),
+                );
                 *root = Node(new_root);
             }
         }
@@ -279,21 +318,23 @@ where
     K: std::fmt::Debug,
     V: std::fmt::Debug,
 {
-    fn empty(b: u32, height: Height) -> Self {
+    fn empty(b: u32, height: Height, flush_policy: FlushPolicy) -> Self {
         Self {
             height,
             b,
             starts_with_lead: false,
             buffer: vec![],
             entries: DenseRangeMap::new(),
+            flush_policy,
         }
     }
 
-    fn new_root(b: u32, key: K, val: V, height: Height) -> Rc<Self> {
+    fn new_root(b: u32, key: K, val: V, height: Height, flush_policy: FlushPolicy) -> Rc<Self> {
         // COUNTERS.with(|c| c.new_node(1));
         Rc::new(Self {
             height,
             b,
+            flush_policy,
             starts_with_lead: false,
             buffer: vec![Op::Insert(key, val, height)],
             entries: DenseRangeMap::new(),
@@ -305,6 +346,7 @@ where
         key: K,
         value: V,
         height: Height,
+        flush_policy: FlushPolicy,
         (mut old_height, mut old_root): (Height, Node),
     ) -> Rc<Self> {
         while old_height < height - 1 {
@@ -313,6 +355,7 @@ where
             old_root = Rc::new(Self {
                 height: old_height,
                 b,
+                flush_policy,
                 starts_with_lead: true,
                 buffer: vec![],
                 entries: (Range::everything(), old_root).into(),
@@ -322,6 +365,7 @@ where
         Rc::new(Self {
             height,
             b,
+            flush_policy,
             starts_with_lead: true,
             buffer: vec![Op::Insert(key, value, height)],
             entries: (Range::everything(), old_root).into(),
@@ -336,6 +380,7 @@ where
         Self {
             height: self.height,
             b: self.b,
+            flush_policy: self.flush_policy,
             starts_with_lead: true,
             buffer: self.sub_buffer(range).to_vec(),
             entries: self.entries.sub_entries(range).cloned(),
@@ -495,43 +540,84 @@ where
         K: Ord + Clone,
         V: Clone,
     {
-        let buffer: VecDeque<_> = ops.collect();
+        let (to_flush, to_retain) = self.pick_ops_to_flush(range, ops);
+        assert!(!to_flush.is_empty());
         let sub_entries = self.entries.sub_entries(range);
 
         let mut key_builder = map_builder();
 
-        self.apply_ops_to_pivots(sub_entries, &buffer, &mut key_builder, range);
+        self.apply_ops_to_pivots(sub_entries, &to_flush, &mut key_builder, range);
 
         let mut value_builder = key_builder.finish_with(range.end().cloned());
 
         COUNTERS.with(|c| c.inc_depth());
 
         if self.height == 1 {
-            self.apply_ops_to_leaves(range, sub_entries, buffer, &mut value_builder);
+            self.apply_ops_to_leaves(range, sub_entries, to_flush, &mut value_builder);
         } else if sub_entries.is_empty() {
-            let temp_child: Self = Self::empty(self.b, self.height - 1);
-            temp_child.add_ops(range, buffer.into_iter(), &mut value_builder);
+            let temp_child: Self = Self::empty(self.b, self.height - 1, self.flush_policy);
+            temp_child.add_ops(range, to_flush.into_iter(), &mut value_builder);
         } else {
-            Self::apply_ops_to_children(range, sub_entries, buffer, &mut value_builder);
+            Self::apply_ops_to_children(range, sub_entries, to_flush, &mut value_builder);
         }
 
         let current_depth = COUNTERS.with(|c| c.dec_depth());
 
+        let mut for_nodes = to_retain.into_iter().peekable();
         value_builder
             .finish()
             .map(|(entries, starts_with_lead)| {
                 if current_depth > 0 {
                     COUNTERS.with(|c| c.new_node(entries.len()));
                 }
+                let range = entries.range();
+                let buffer = for_nodes
+                    .peeking_take_while(|op| range.contains(&op.key()))
+                    .collect();
                 Rc::new(Self {
                     height: self.height,
                     b: self.b,
+                    flush_policy: self.flush_policy,
                     starts_with_lead,
-                    buffer: vec![],
+                    buffer,
                     entries,
                 })
             })
             .collect()
+    }
+
+    fn pick_ops_to_flush(
+        &self,
+        range: Range<&K>,
+        ops: impl Iterator<Item = Op<K, V>>,
+    ) -> (VecDeque<Op<K, V>>, VecDeque<Op<K, V>>)
+    where
+        K: Ord,
+    {
+        use FlushPolicy::*;
+        match self.flush_policy {
+            FirstRun if self.height > 1 => {
+                let mut all_ops: VecDeque<_> = ops.collect();
+                let num_children = self.entries.sub_entries(range).len();
+                let mut allowed_to_remain = (self.b as usize).saturating_sub(num_children);
+                let mut ops_iter = all_ops.iter();
+                let mut to_flush = ops_iter
+                    .peeking_take_while(|op| op.height() < self.height)
+                    .count();
+                while to_flush < all_ops.len()
+                    && (all_ops.len() - to_flush > allowed_to_remain || to_flush == 0)
+                {
+                    to_flush += 1;
+                    allowed_to_remain = allowed_to_remain.saturating_sub(1);
+                    _ = ops_iter.next().unwrap();
+                    to_flush += ops_iter
+                        .peeking_take_while(|op| op.height() < self.height)
+                        .count();
+                }
+                (all_ops.drain(..to_flush).collect(), all_ops)
+            }
+            _ => (ops.collect(), VecDeque::new()),
+        }
     }
 
     fn apply_ops_to_pivots(
@@ -834,7 +920,23 @@ const TABLE_START: &str = "<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\
 const TABLE_END: &str = "</TABLE>";
 
 impl<K, V> List<K, V> {
+    pub fn output_simple_dot(&self) -> String
+    where
+        K: std::fmt::Debug + Ord + 'static,
+        V: std::fmt::Debug + 'static,
+    {
+        self.output_dot_inner(false)
+    }
+
     pub fn output_dot(&self) -> String
+    where
+        K: std::fmt::Debug + Ord + 'static,
+        V: std::fmt::Debug + 'static,
+    {
+        self.output_dot_inner(true)
+    }
+
+    fn output_dot_inner(&self, detailed: bool) -> String
     where
         K: std::fmt::Debug + Ord + 'static,
         V: std::fmt::Debug + 'static,
@@ -857,8 +959,8 @@ impl<K, V> List<K, V> {
 
         match &self.root {
             Nothing => {}
-            Node(node) => node.output_dot(&mut out, &mut edges, &mut HashMap::new()),
-            Leaf(leaf) => leaf.output_dot(&mut out, &mut HashMap::new()),
+            Node(node) => node.output_dot(&mut out, &mut edges, &mut HashMap::new(), detailed),
+            Leaf(leaf) => leaf.output_dot(&mut out, &mut HashMap::new(), detailed),
         }
 
         out.push_str(&edges);
@@ -893,7 +995,8 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         let mut map = HashMap::new();
 
         for node in iter {
-            node.as_ref().output_dot(&mut out, &mut edges, &mut map);
+            node.as_ref()
+                .output_dot(&mut out, &mut edges, &mut map, true);
         }
 
         out.push_str(&edges);
@@ -908,6 +1011,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         out: &mut String,
         edges: &mut String,
         seen: &mut HashMap<*const (), usize>,
+        detailed: bool,
     ) where
         K: std::fmt::Debug + Ord,
         V: std::fmt::Debug,
@@ -925,9 +1029,9 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
 
         for (_, child) in self.entries.iter() {
             if self.height == 1 {
-                <_ as AsNode<K, V>>::as_leaf(child).output_dot(out, seen)
+                <_ as AsNode<K, V>>::as_leaf(child).output_dot(out, seen, detailed)
             } else {
-                <_ as AsNode<K, V>>::as_upper(child).output_dot(out, edges, seen)
+                <_ as AsNode<K, V>>::as_upper(child).output_dot(out, edges, seen, detailed)
             }
         }
 
@@ -939,15 +1043,18 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
         .unwrap();
 
         writeln!(out, "    <TR><TD>").unwrap();
-        write!(out, "      {}", self.buffer.len()).unwrap();
-        // for (i, buffered) in self.buffer.iter().enumerate() {
-        //     if i == 0 {
-        //         write!(out, "      ").unwrap()
-        //     } else if i > 0 {
-        //         write!(out, "{}", if i % 5 == 0 { "<BR/> " } else { " " }).unwrap()
-        //     }
-        //     write!(out, "{buffered:?}").unwrap()
-        // }
+        if detailed {
+            for (i, buffered) in self.buffer.iter().enumerate() {
+                if i == 0 {
+                    write!(out, "      ").unwrap()
+                } else if i > 0 {
+                    write!(out, "{}", if i % 5 == 0 { "<BR/> " } else { " " }).unwrap()
+                }
+                write!(out, "{buffered:?}").unwrap()
+            }
+        } else {
+            write!(out, "      {}", self.buffer.len()).unwrap();
+        }
         writeln!(out, "    </TD></TR>").unwrap();
 
         writeln!(out, "    <TR><TD>").unwrap();
@@ -959,8 +1066,11 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
 
             let (start, end) = range.inner();
             end_range = Some(end);
-            // writeln!(out, "          <TD PORT=\"p{i}\">{start:?}</TD>").unwrap();
-            writeln!(out, "          <TD PORT=\"p{i}\"> </TD>").unwrap();
+            if detailed {
+                writeln!(out, "          <TD PORT=\"p{i}\">{start:?}</TD>").unwrap();
+            } else {
+                writeln!(out, "          <TD PORT=\"p{i}\"> </TD>").unwrap();
+            }
             let child = if self.height == 1 {
                 <_ as AsNode<K, V>>::as_leaf(child) as *const _ as *const ()
             } else {
@@ -970,9 +1080,12 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
             writeln!(edges, "  n{ptr:?}:p{i}:s -> n{child:?}:n [weight=0.01]").unwrap();
         }
         if let Some(end) = end_range {
-            // writeln!(out, "          <TD>{end:?}</TD>").unwrap();
-            let count = self.entries.len();
-            writeln!(out, "          <TD>{count:?}</TD>").unwrap();
+            if detailed {
+                writeln!(out, "          <TD>{end:?}</TD>").unwrap();
+            } else {
+                let count = self.entries.len();
+                writeln!(out, "          <TD>{count:?}</TD>").unwrap();
+            }
             writeln!(out, "        </TR>\n      {TABLE_END}").unwrap();
         }
         writeln!(out, "    </TD></TR>\n  {TABLE_END}\n>]\n").unwrap();
@@ -984,7 +1097,7 @@ impl<K: 'static, V: 'static> UpperNode<K, V> {
 }
 
 impl<K, V> LeafNode<K, V> {
-    pub fn output_dot(&self, out: &mut String, seen: &mut HashMap<*const (), usize>)
+    pub fn output_dot(&self, out: &mut String, seen: &mut HashMap<*const (), usize>, detailed: bool)
     where
         K: std::fmt::Debug,
         V: std::fmt::Debug,
@@ -1007,26 +1120,29 @@ impl<K, V> LeafNode<K, V> {
         .unwrap();
 
         let mut first = true;
-        // for (k, _) in &self.entries {
-        //     if first {
-        //         writeln!(out, "    <TR>").unwrap();
-        //     }
-        //     first = false;
-        //     writeln!(out, "      <TD>{k:?}</TD>").unwrap();
-        // }
-        // if !first {
-        //     writeln!(out, "    </TR>").unwrap();
-        //     writeln!(out, "    <TR>").unwrap();
-        // }
-        // for (_, v) in &self.entries {
-        //     writeln!(out, "      <TD>{v:?}</TD>").unwrap();
-        // }
-        // if !first {
-        //     writeln!(out, "    </TR>").unwrap();
-        // } else {
-        //     writeln!(out, "    <TR><TD> ∅ </TD></TR>").unwrap();
-        // }
-        writeln!(out, "    <TR><TD> {} </TD></TR>", self.entries.len()).unwrap();
+        if detailed {
+            for (k, _) in &self.entries {
+                if first {
+                    writeln!(out, "    <TR>").unwrap();
+                }
+                first = false;
+                writeln!(out, "      <TD>{k:?}</TD>").unwrap();
+            }
+            if !first {
+                writeln!(out, "    </TR>").unwrap();
+                writeln!(out, "    <TR>").unwrap();
+            }
+            for (_, v) in &self.entries {
+                writeln!(out, "      <TD>{v:?}</TD>").unwrap();
+            }
+            if !first {
+                writeln!(out, "    </TR>").unwrap();
+            } else {
+                writeln!(out, "    <TR><TD> ∅ </TD></TR>").unwrap();
+            }
+        } else {
+            writeln!(out, "    <TR><TD> {} </TD></TR>", self.entries.len()).unwrap();
+        }
         writeln!(out, "  {TABLE_END}\n>]\n").unwrap();
     }
 
@@ -1131,49 +1247,49 @@ impl<K, V> From<Rc<LeafNode<K, V>>> for Root<K, V> {
 
 #[cfg(test)]
 mod test {
-    use crate::dense_range_map::{Range, RangeBound};
+    use crate::dense_range_map::Range;
 
-    use RangeBound::{NegInf, PosInf};
+    // use RangeBound::{NegInf, PosInf};
 
-    use super::{Counters, LeafNode, COUNTERS};
+    use super::{LeafNode, COUNTERS};
 
-    macro_rules! Leaf {
-        ($($key:expr => $val:expr),* $(,)?) => {
-            std::rc::Rc::new(LeafNode {
-                entries: vec![$(($key, $val)),*],
-            })
-        };
-    }
+    // macro_rules! Leaf {
+    //     ($($key:expr => $val:expr),* $(,)?) => {
+    //         std::rc::Rc::new(LeafNode {
+    //             entries: vec![$(($key, $val)),*],
+    //         })
+    //     };
+    // }
 
-    macro_rules! Upper {
-        ($height:expr; $first_key:expr $(, $val:expr, $key:expr)+  ) => {
-            {
-                use std::rc::Rc;
-                use std::any::Any;
+    // macro_rules! Upper {
+    //     ($height:expr; $first_key:expr $(, $val:expr, $key:expr)+  ) => {
+    //         {
+    //             use std::rc::Rc;
+    //             use std::any::Any;
 
-                let mut key_builder = crate::dense_range_map::map_builder();
-                key_builder.start_new_map_with(RangeBound::from($first_key), ());
-                $(key_builder.add_key_to_map(RangeBound::from($key));)+
-                let mut val_builder = key_builder.finish();
-                $(val_builder.add_value(Rc::clone(&$val) as Rc<dyn Any>);)+
-                let mut maps = val_builder.finish();
-                let (entries, _) = maps.next().unwrap();
-                assert!(maps.next().is_none());
-                Rc::new(super::UpperNode {
-                    b: 0,
-                    height: $height,
-                    starts_with_lead: false,
-                    buffer: {
-                        #[allow(unused_mut)]
-                        let mut buffer;
-                        $( _ = buffer; buffer = $val.typed_buffer(); )+
-                        buffer
-                    },
-                    entries,
-                })
-            }
-        };
-    }
+    //             let mut key_builder = crate::dense_range_map::map_builder();
+    //             key_builder.start_new_map_with(RangeBound::from($first_key), ());
+    //             $(key_builder.add_key_to_map(RangeBound::from($key));)+
+    //             let mut val_builder = key_builder.finish();
+    //             $(val_builder.add_value(Rc::clone(&$val) as Rc<dyn Any>);)+
+    //             let mut maps = val_builder.finish();
+    //             let (entries, _) = maps.next().unwrap();
+    //             assert!(maps.next().is_none());
+    //             Rc::new(super::UpperNode {
+    //                 b: 0,
+    //                 height: $height,
+    //                 starts_with_lead: false,
+    //                 buffer: {
+    //                     #[allow(unused_mut)]
+    //                     let mut buffer;
+    //                     $( _ = buffer; buffer = $val.typed_buffer(); )+
+    //                     buffer
+    //                 },
+    //                 entries,
+    //             })
+    //         }
+    //     };
+    // }
 
     #[test]
     fn leaf_sub_entries() {
@@ -1662,6 +1778,46 @@ mod test {
     }
 
     #[test]
+    fn flush_first() {
+        let mut list: super::List<u32, u32> =
+            super::List::with_strategy(3, super::FlushPolicy::FirstRun);
+        list.insert(1599564650, 1600085855);
+        list.insert(1600085855, 30464);
+        list.insert(8388608, 16);
+        list.insert(5729111, 1086879488);
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn flush_leaves() {
+        let mut list: super::List<u32, u32> =
+            super::List::with_strategy(3, super::FlushPolicy::FirstRun);
+        list.insert(1869573999, 1869573999);
+        list.insert(0, 0);
+        list.insert(1862270976, 1869573999);
+        list.insert(1869573999, 249786223);
+        println!("{}", list.output_dot());
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn flush_more() {
+        let mut list: super::List<u32, u32> =
+            super::List::with_strategy(3, super::FlushPolicy::FirstRun);
+        list.insert(503316480, 2049755281);
+        list.insert(0, 2439217152);
+        list.insert(318782058, 1785366528);
+        list.insert(286331153, 286331153);
+        list.insert(286331153, 286331153);
+        list.insert(286331153, 286331153);
+        list.insert(286331153, 1785358954);
+        println!("{}", list.output_dot());
+        list.insert(2290186071, 2439670479);
+        println!("{}", list.output_dot());
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
     fn random_inserts_128() {
         COUNTERS.with(|c| c.reset());
         let mut list: super::List<u64, u64> = super::List::new(128);
@@ -1761,26 +1917,50 @@ mod test {
     }
 
     #[test]
-    fn small_random_inserts() {
+    fn random_inserts_flush_first_1024() {
         COUNTERS.with(|c| c.reset());
-        let mut list: super::List<u64, u64> = super::List::new(64);
-        for _ in 0..3_000 {
+        let mut list: super::List<u64, u64> =
+            super::List::with_strategy(1024, super::FlushPolicy::FirstRun);
+        for _ in 0..10_000_000 {
             list.insert(rand::random(), rand::random());
         }
         let counts = COUNTERS.with(|c| c.counts());
-        // counts.print();
-        println!("{}", list.output_dot());
+        counts.print();
     }
 
     #[test]
-    fn small_ordered_inserts() {
+    fn ordered_inserts_flush_first_1024() {
         COUNTERS.with(|c| c.reset());
-        let mut list: super::List<u64, u64> = super::List::new(64);
-        for i in 0..3_000 {
+        let mut list: super::List<u64, u64> =
+            super::List::with_strategy(1024, super::FlushPolicy::FirstRun);
+        for i in 0..10_000_000 {
             list.insert(i, rand::random());
         }
         let counts = COUNTERS.with(|c| c.counts());
-        // counts.print();
-        println!("{}", list.output_dot());
+        counts.print();
     }
+
+    // #[test]
+    // fn small_random_inserts() {
+    //     COUNTERS.with(|c| c.reset());
+    //     let mut list: super::List<u64, u64> = super::List::new(64);
+    //     for _ in 0..3_000 {
+    //         list.insert(rand::random(), rand::random());
+    //     }
+    //     let counts = COUNTERS.with(|c| c.counts());
+    //     // counts.print();
+    //     println!("{}", list.output_simple_dot());
+    // }
+
+    // #[test]
+    // fn small_ordered_inserts() {
+    //     COUNTERS.with(|c| c.reset());
+    //     let mut list: super::List<u64, u64> = super::List::new(64);
+    //     for i in 0..3_000 {
+    //         list.insert(i, rand::random());
+    //     }
+    //     let counts = COUNTERS.with(|c| c.counts());
+    //     // counts.print();
+    //     println!("{}", list.output_simple_dot());
+    // }
 }

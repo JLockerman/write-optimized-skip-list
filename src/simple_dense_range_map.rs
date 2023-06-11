@@ -1,3 +1,5 @@
+#![allow(private_in_public)]
+
 use std::{
     cmp::Ordering,
     ops::{Bound, Index, RangeBounds},
