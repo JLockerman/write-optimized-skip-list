@@ -150,6 +150,9 @@ struct UpperNode<K, V> {
 pub enum FlushPolicy {
     Everything,
     FirstRun,
+    FirstChild,
+    LongestChild,
+    ShortestChild,
 }
 
 #[derive(Debug, Clone)]
@@ -615,6 +618,126 @@ where
                         .count();
                 }
                 (all_ops.drain(..to_flush).collect(), all_ops)
+            }
+            FirstChild if self.height > 1 => {
+                let mut all_ops: VecDeque<_> = ops.collect();
+                let num_children = self.entries.sub_entries(range).len();
+                let mut allowed_to_remain = (self.b as usize).saturating_sub(num_children);
+                let mut ops_iter = all_ops.iter();
+                let mut to_flush = 0;
+                for (child_range, _) in self.entries.sub_entries(range).iter() {
+                    to_flush += ops_iter
+                        .peeking_take_while(|op| child_range.contains(&op.key()))
+                        .inspect(|op| {
+                            if op.height() >= self.height {
+                                allowed_to_remain = allowed_to_remain.saturating_sub(1);
+                            }
+                        })
+                        .count();
+                    if allowed_to_remain == 0 {
+                        to_flush = all_ops.len();
+                        break;
+                    }
+                    if to_flush > 0 && all_ops.len() - to_flush <= allowed_to_remain {
+                        break;
+                    }
+                }
+                if to_flush == 0 {
+                    to_flush = all_ops.len()
+                }
+                (all_ops.drain(..to_flush).collect(), all_ops)
+            }
+            LongestChild if self.height > 1 => {
+                let mut all_ops: VecDeque<_> = ops.collect();
+                let num_children = self.entries.sub_entries(range).len();
+                let mut allowed_to_remain = (self.b as usize).saturating_sub(num_children);
+                let mut ops_iter = all_ops.iter();
+                let mut to_flush = 0;
+                let sub_entries = self.entries.sub_entries(range);
+                if sub_entries.len() == 0 {
+                    return (all_ops, VecDeque::default());
+                }
+                let mut ranges = Vec::with_capacity(sub_entries.len());
+                let mut range_start = 0;
+                for (child_range, _) in sub_entries.iter() {
+                    let mut num_pivots = 0;
+                    let range_len = ops_iter
+                        .peeking_take_while(|op| child_range.contains(&op.key()))
+                        .inspect(|op| {
+                            if op.height() >= self.height {
+                                num_pivots += 1;
+                            }
+                        })
+                        .count();
+                    ranges.push((range_start, range_len, num_pivots, false));
+                    range_start += range_len
+                }
+                ranges.sort_by_key(|(_, _, num_pivots, _)| *num_pivots);
+                for (_, range_len, num_pivots, will_flush) in ranges.iter_mut().rev() {
+                    to_flush += *range_len;
+                    allowed_to_remain = allowed_to_remain.saturating_sub(*num_pivots);
+                    *will_flush = true;
+                    if all_ops.len() - to_flush <= allowed_to_remain && to_flush > 0 {
+                        break;
+                    }
+                }
+                ranges.sort_by_key(|(range_start, ..)| *range_start);
+                let (mut flush, mut retain) = (VecDeque::default(), VecDeque::default());
+                for (_, range_len, _, will_flush) in ranges {
+                    let values = all_ops.drain(..range_len);
+                    if will_flush {
+                        flush.extend(values)
+                    } else {
+                        retain.extend(values)
+                    }
+                }
+                (flush, retain)
+            }
+            LongestChild if self.height > 1 => {
+                let mut all_ops: VecDeque<_> = ops.collect();
+                let num_children = self.entries.sub_entries(range).len();
+                let mut allowed_to_remain = (self.b as usize).saturating_sub(num_children);
+                let mut ops_iter = all_ops.iter();
+                let mut to_flush = 0;
+                let sub_entries = self.entries.sub_entries(range);
+                if sub_entries.len() == 0 {
+                    return (all_ops, VecDeque::default());
+                }
+                let mut ranges = Vec::with_capacity(sub_entries.len());
+                let mut range_start = 0;
+                for (child_range, _) in sub_entries.iter() {
+                    let mut num_pivots = 0;
+                    let range_len = ops_iter
+                        .peeking_take_while(|op| child_range.contains(&op.key()))
+                        .inspect(|op| {
+                            if op.height() >= self.height {
+                                num_pivots += 1;
+                            }
+                        })
+                        .count();
+                    ranges.push((range_start, range_len, num_pivots, false));
+                    range_start += range_len
+                }
+                ranges.sort_by_key(|(_, _, num_pivots, _)| *num_pivots);
+                for (_, range_len, num_pivots, will_flush) in ranges.iter_mut() {
+                    to_flush += *range_len;
+                    allowed_to_remain = allowed_to_remain.saturating_sub(*num_pivots);
+                    *will_flush = true;
+                    if all_ops.len() - to_flush <= allowed_to_remain && to_flush > 0 {
+                        break;
+                    }
+                }
+                ranges.sort_by_key(|(range_start, ..)| *range_start);
+                let (mut flush, mut retain) = (VecDeque::default(), VecDeque::default());
+                for (_, range_len, _, will_flush) in ranges {
+                    let values = all_ops.drain(..range_len);
+                    if will_flush {
+                        flush.extend(values)
+                    } else {
+                        retain.extend(values)
+                    }
+                }
+                (flush, retain)
             }
             _ => (ops.collect(), VecDeque::new()),
         }
@@ -1917,7 +2040,7 @@ mod test {
     }
 
     #[test]
-    fn random_inserts_flush_first_1024() {
+    fn random_inserts_flush_first_run_1024() {
         COUNTERS.with(|c| c.reset());
         let mut list: super::List<u64, u64> =
             super::List::with_strategy(1024, super::FlushPolicy::FirstRun);
@@ -1929,10 +2052,82 @@ mod test {
     }
 
     #[test]
-    fn ordered_inserts_flush_first_1024() {
+    fn ordered_inserts_flush_first_run_1024() {
         COUNTERS.with(|c| c.reset());
         let mut list: super::List<u64, u64> =
             super::List::with_strategy(1024, super::FlushPolicy::FirstRun);
+        for i in 0..10_000_000 {
+            list.insert(i, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn random_inserts_flush_first_child_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> =
+            super::List::with_strategy(1024, super::FlushPolicy::FirstChild);
+        for _ in 0..10_000_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn ordered_inserts_flush_first_child_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> =
+            super::List::with_strategy(1024, super::FlushPolicy::FirstChild);
+        for i in 0..10_000_000 {
+            list.insert(i, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn random_inserts_flush_longest_child_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> =
+            super::List::with_strategy(1024, super::FlushPolicy::LongestChild);
+        for _ in 0..10_000_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn ordered_inserts_flush_longest_child_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> =
+            super::List::with_strategy(1024, super::FlushPolicy::LongestChild);
+        for i in 0..10_000_000 {
+            list.insert(i, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn random_inserts_flush_shortest_child_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> =
+            super::List::with_strategy(1024, super::FlushPolicy::ShortestChild);
+        for _ in 0..10_000_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn ordered_inserts_flush_shortest_child_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> =
+            super::List::with_strategy(1024, super::FlushPolicy::ShortestChild);
         for i in 0..10_000_000 {
             list.insert(i, rand::random());
         }
