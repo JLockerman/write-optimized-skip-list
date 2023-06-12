@@ -433,6 +433,20 @@ where
     }
 }
 
+impl<K> PartialOrd<K> for RangeBound<K>
+where
+    K: PartialOrd,
+{
+    fn partial_cmp(&self, other: &K) -> Option<Ordering> {
+        use RangeBound::*;
+        match self {
+            NegInf => Some(Ordering::Less),
+            Includes(this) => this.partial_cmp(other),
+            PosInf => Some(Ordering::Greater),
+        }
+    }
+}
+
 impl<K> PartialOrd for RangeBound<K>
 where
     K: Ord,
@@ -560,6 +574,10 @@ where
         }
         self.keys.last_mut().unwrap().0.push(key);
         self
+    }
+
+    pub fn current_map_len(&self) -> usize {
+        self.keys.last().map(|m| m.0.len()).unwrap_or(0)
     }
 
     pub fn finish_with<V>(mut self, key: RangeBound<K>) -> ValueBuilder<K, V, M>
@@ -808,7 +826,10 @@ mod test {
         let map = dense_range_map!(NegInf, 11, Includes(10), 2, Includes(57), 333, PosInf);
 
         let a = map.sub_entries((NegInf, Includes(&10)).into());
-        assert_eq!(a, sub_entries!([NegInf, Includes(&10)] NegInf, 11, Includes(10)));
+        assert_eq!(
+            a,
+            sub_entries!([NegInf, Includes(&10)] NegInf, 11, Includes(10))
+        );
 
         let first_range = Range::new(NegInf, Includes(&10));
         for i in 0..10 {
@@ -829,7 +850,10 @@ mod test {
         let map = dense_range_map!(NegInf, 11, Includes(10), 2, Includes(57), 333, PosInf);
 
         let a = map.sub_entries((&10, &58).into());
-        assert_eq!(a, sub_entries!([&10, &58] Includes(10), 2, Includes(57), 333, PosInf));
+        assert_eq!(
+            a,
+            sub_entries!([&10, &58] Includes(10), 2, Includes(57), 333, PosInf)
+        );
 
         for i in 0..10 {
             assert_eq!(a.get(&i), None);

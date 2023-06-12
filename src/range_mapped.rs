@@ -87,14 +87,14 @@ impl CountersInner {
             .into_iter()
             .sorted_unstable_by_key(|(num, _)| *num)
             .collect_vec();
-        println!("new_nodes/insert: {new_nodes:?}");
+        println!("new_nodes/insert: {new_nodes:?}\n");
 
         let node_sizes = self
             .node_sizes
             .into_iter()
             .sorted_unstable_by_key(|(num, _)| *num)
             .collect_vec();
-        println!("sizes/insert: {node_sizes:?}");
+        println!("sizes/insert: {node_sizes:?}\n");
 
         println!(
             "inserts {}, nodes {}",
@@ -826,8 +826,15 @@ where
         use itertools::EitherOrBoth::*;
         use Op::*;
 
-        let mut entries = sub_entries
-            .iter()
+        let mut children = sub_entries.iter().peekable();
+        let unchanged = children.peeking_take_while(|(child_range, ..)| {
+            *child_range.end() <= buffer.front().unwrap().key()
+        });
+        for (_, child) in unchanged {
+            value_builder.add_value(child.clone());
+        }
+
+        let mut entries = children
             .coalesce(|(ka, va), (kb, vb)| {
                 if Rc::ptr_eq(va, vb) {
                     Ok((Range::merge(ka, kb), va))
@@ -1388,15 +1395,12 @@ impl<K, V> From<Rc<LeafNode<K, V>>> for Root<K, V> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashSet;
-
-    use rand::Rng;
 
     use crate::dense_range_map::Range;
 
     // use RangeBound::{NegInf, PosInf};
 
-    use super::{LeafNode, COUNTERS};
+    use super::LeafNode;
 
     // macro_rules! Leaf {
     //     ($($key:expr => $val:expr),* $(,)?) => {
@@ -1961,6 +1965,18 @@ mod test {
         println!("{}", list.output_dot());
         insta::assert_snapshot!(list.output_dot());
     }
+}
+
+#[cfg(test)]
+mod perf {
+
+    use std::collections::HashSet;
+
+    use rand::Rng;
+
+    // use RangeBound::{NegInf, PosInf};
+
+    use super::COUNTERS;
 
     #[test]
     fn random_inserts_128() {
@@ -2158,7 +2174,7 @@ mod test {
     }
 
     #[test]
-    fn small_cardinality_random_inserts_1024() {
+    fn random_inserts_small_cardinality_1024() {
         COUNTERS.with(|c| c.reset());
         let mut list: super::List<u64, u64> = super::List::new(1024);
         for _ in 0..10_000_000 {
