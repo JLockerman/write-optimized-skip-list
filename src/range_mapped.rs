@@ -483,6 +483,12 @@ where
         }
 
         self.canonicalize_buffer();
+
+        if self.remaining_buffer_space(Range::everything()) >= 1 {
+            self.buffer.push(op);
+            return None;
+        }
+
         // TODO can we elide the VecDeque
         let mut new_nodes = self.flush(Range::everything(), once(op));
         // let mut new_nodes = self.flush(b, empty());
@@ -501,7 +507,6 @@ where
     {
         self.buffer.extend(ops);
         self.canonicalize_buffer();
-        COUNTERS.with(|c| c.new_node(self.slots_used(Range::everything())))
     }
 
     fn canonicalize_buffer(&mut self)
@@ -888,9 +893,22 @@ where
             let mut new_node = self.clone_range(range); // FIXME only clone in range
             new_node.extend_buffer_with_ops(new_ops);
             value_builder.add_value_for_range(range, Rc::new(new_node));
+            COUNTERS.with(|c| c.new_node(self.slots_used(Range::everything())));
             return;
         }
+
+        // let new_ops = new_ops.collect_vec();
+        // let mut new_node = self.clone_range(range); // FIXME only clone in range
+        // new_node.extend_buffer_with_ops(new_ops.clone().into_iter());
+
+        // if new_node.remaining_buffer_space(range) > 0 {
+        //     value_builder.add_value_for_range(range, Rc::new(new_node));
+        //     COUNTERS.with(|c| c.new_node(self.slots_used(Range::everything())));
+        //     return;
+        // }
+
         // println!("{}", self.height);
+        // let replacement_nodes = self.flush(range, new_ops.clone().into_iter());
         let replacement_nodes = self.flush(range, new_ops);
         // println!("{}", Self::out_put_dot_for_iter(&replacement_nodes));
         for node in replacement_nodes {
@@ -1370,6 +1388,10 @@ impl<K, V> From<Rc<LeafNode<K, V>>> for Root<K, V> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
+    use rand::Rng;
+
     use crate::dense_range_map::Range;
 
     // use RangeBound::{NegInf, PosInf};
@@ -2135,17 +2157,90 @@ mod test {
         counts.print();
     }
 
-    // #[test]
-    // fn small_random_inserts() {
-    //     COUNTERS.with(|c| c.reset());
-    //     let mut list: super::List<u64, u64> = super::List::new(64);
-    //     for _ in 0..3_000 {
-    //         list.insert(rand::random(), rand::random());
-    //     }
-    //     let counts = COUNTERS.with(|c| c.counts());
-    //     // counts.print();
-    //     println!("{}", list.output_simple_dot());
-    // }
+    #[test]
+    fn small_cardinality_random_inserts_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(1024);
+        for _ in 0..10_000_000 {
+            list.insert(rand::thread_rng().gen_range(0..1000_000), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn semi_ordered_inserts_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(1024);
+        for i in 0..10_000_000 {
+            list.insert(rand::thread_rng().gen_range(0..=i), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+    }
+
+    #[test]
+    fn zeta_inserts_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut key_set = HashSet::new();
+        let mut list: super::List<i64, u64> = super::List::new(1024);
+        let dist = rand_distr::Zeta::new(1.5).unwrap();
+        for _ in 0..10_000_000 {
+            let key = rand::thread_rng().sample(&dist) as i64;
+            key_set.insert(key);
+            list.insert(key, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+        println!("cardinality: {}", key_set.len());
+        // println!("{}", list.output_simple_dot());
+    }
+
+    #[test]
+    fn normal_inserts_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut key_set = HashSet::new();
+        let mut list: super::List<i64, u64> = super::List::new(1024);
+        let dist = rand_distr::Normal::new(200.0, 6000.0).unwrap();
+        for _ in 0..10_000_000 {
+            let key = rand::thread_rng().sample(&dist) as i64;
+            key_set.insert(key);
+            list.insert(key, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+        println!("cardinality: {}", key_set.len());
+        // println!("{}", list.output_simple_dot());
+    }
+
+    #[test]
+    fn lognormal_inserts_1024() {
+        COUNTERS.with(|c| c.reset());
+        let mut key_set = HashSet::new();
+        let mut list: super::List<i64, u64> = super::List::new(1024);
+        let dist = rand_distr::LogNormal::new(200.0, 6000.0).unwrap();
+        for _ in 0..10_000_000 {
+            let key = rand::thread_rng().sample(&dist) as i64;
+            key_set.insert(key);
+            list.insert(key, rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        counts.print();
+        println!("cardinality: {}", key_set.len());
+        // println!("{}", list.output_simple_dot());
+    }
+
+    #[test]
+    fn small_random_inserts() {
+        COUNTERS.with(|c| c.reset());
+        let mut list: super::List<u64, u64> = super::List::new(64);
+        for _ in 0..3_000 {
+            list.insert(rand::random(), rand::random());
+        }
+        let counts = COUNTERS.with(|c| c.counts());
+        // counts.print();
+        println!("{}", list.output_simple_dot());
+    }
 
     // #[test]
     // fn small_ordered_inserts() {
