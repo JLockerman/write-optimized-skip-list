@@ -570,13 +570,21 @@ where
         }
 
         let current_depth = COUNTERS.with(|c| c.dec_depth());
+        let mut running_size = 0;
 
         let mut for_nodes = to_retain.into_iter().peekable();
-        value_builder
+        let nodes = value_builder
             .finish()
             .map(|(entries, starts_with_lead)| {
                 if current_depth > 0 {
-                    COUNTERS.with(|c| c.new_node(entries.len()));
+                    if running_size + entries.len() <= self.b as usize {
+                        running_size += entries.len()
+                    } else {
+                        if running_size > 0 {
+                            COUNTERS.with(|c| c.new_node(running_size));
+                        }
+                        running_size = entries.len();
+                    }
                 }
                 let range = entries.range();
                 let buffer = for_nodes
@@ -591,7 +599,11 @@ where
                     entries,
                 })
             })
-            .collect()
+            .collect();
+        if running_size > 0 {
+            COUNTERS.with(|c| c.new_node(running_size));
+        }
+        nodes
     }
 
     fn pick_ops_to_flush(
