@@ -826,15 +826,8 @@ where
         use itertools::EitherOrBoth::*;
         use Op::*;
 
-        let mut children = sub_entries.iter().peekable();
-        let unchanged = children.peeking_take_while(|(child_range, ..)| {
-            *child_range.end() <= buffer.front().unwrap().key()
-        });
-        for (_, child) in unchanged {
-            value_builder.add_value(child.clone());
-        }
-
-        let mut entries = children
+        let children = sub_entries.iter();
+        let mut leaf_nodes = children
             .coalesce(|(ka, va), (kb, vb)| {
                 if Rc::ptr_eq(va, vb) {
                     Ok((Range::merge(ka, kb), va))
@@ -842,45 +835,80 @@ where
                     Err(((ka, va), (kb, vb)))
                 }
             })
-            .flat_map(|(child_range, node)| {
-                <_ as AsNode<K, V>>::as_leaf(node)
-                    .sub_entries(child_range.clamp_to(range))
-                    .iter()
-            })
-            .merge_join_by(buffer, |(k, _), op| k.cmp(op.key()))
-            .filter_map(|eop| match eop {
-                Both(_, Insert(k, v, ..)) | Right(Insert(k, v, ..)) => Some((k, v)),
-                Both(_, Delete(..)) | Right(Delete(..)) => None,
-                Left((k, v)) => Some((k.clone(), v.clone())),
-            })
             .peekable();
+        let unchanged = leaf_nodes.peeking_take_while(|(child_range, ..)| {
+            *child_range.end() <= buffer.front().unwrap().key()
+        });
+        for (leaf_range, leaf) in unchanged {
+            value_builder.add_value_for_range(leaf_range, leaf.clone());
+        }
 
-        while let Some(..) = entries.peek() {
+        let mut ops = buffer.into_iter().peekable();
+        let mut from_leaves = VecDeque::new();
+        let mut pending_entries = VecDeque::new();
+        while let Some(..) = ops.peek() {
+            let mut add_to = |pending_entries: &mut VecDeque<(K, V)>, active_range: Range<&K>| {
+                let overlapping_leaf_values = leaf_nodes
+                    .peeking_take_while(|(leaf_range, ..)| active_range.overlaps(*leaf_range))
+                    .flat_map(|(leaf_range, leaf)| {
+                        <_ as AsNode<K, V>>::as_leaf(leaf)
+                            .sub_entries(leaf_range.clamp_to(range))
+                            .iter()
+                    });
+                from_leaves.extend(overlapping_leaf_values);
+                let applicable_ops = ops.peeking_take_while(|op| active_range.contains(&op.key()));
+                let leaf_entries_in_run = std::iter::from_fn(|| {
+                    from_leaves
+                        .front()
+                        .map(|(k, ..)| active_range.contains(&k))
+                        .unwrap_or(false)
+                        .then(|| from_leaves.pop_front().unwrap())
+                });
+                let new_entries = leaf_entries_in_run
+                    .merge_join_by(applicable_ops, |(k, _), op| k.cmp(op.key()))
+                    .filter_map(|eop| match eop {
+                        Both(_, Insert(k, v, ..)) | Right(Insert(k, v, ..)) => Some((k, v)),
+                        Both(_, Delete(..)) | Right(Delete(..)) => None,
+                        Left((k, v)) => Some((k.clone(), v.clone())),
+                    });
+
+                pending_entries.extend(new_entries);
+            };
+
             let current_range = value_builder.current_range().unwrap();
-            let mut current_entries = entries
-                .peeking_take_while(|(k, _)| current_range.contains(&k))
-                .collect_vec();
+            add_to(&mut pending_entries, current_range);
+            let mut current_entries = pending_entries.drain(..).collect_vec();
 
             while let Some(next_range) = value_builder.next_range_in_map() {
-                let next_run = entries
-                    .peeking_take_while(|(k, _)| next_range.contains(&k))
-                    .collect_vec();
-                let new_len = current_entries.len() + next_run.len();
-                if new_len <= self.b as usize {
-                    current_entries.extend(next_run);
+                add_to(&mut pending_entries, next_range);
+                let num_new = pending_entries.partition_point(|(k, _)| next_range.contains(&k));
+
+                let new_len = num_new + current_entries.len();
+                if current_entries.is_empty() || new_len <= self.b as usize {
+                    current_entries.extend(pending_entries.drain(..num_new));
                     value_builder.increment_range();
                     continue;
-                } else {
-                    value_builder.add_value(LeafNode::new(current_entries) as Node);
-                    current_entries = next_run;
                 }
+
+                COUNTERS.with(|c| c.new_node(current_entries.len()));
+                value_builder.add_value(LeafNode::new(current_entries) as Node);
+                current_entries = pending_entries.drain(..num_new).collect_vec();
             }
+
+            assert!(pending_entries.is_empty());
 
             COUNTERS.with(|c| c.new_node(current_entries.len()));
             value_builder.add_value(LeafNode::new(current_entries) as Node);
         }
 
-        debug_assert!(entries.peek().is_none());
+        while !pending_entries.is_empty() {
+            todo!("handle trailing entries") // TODO this seems hard to reach
+        }
+
+        for (leaf_range, leaf) in leaf_nodes { // TODO this might not actually ever happen
+            value_builder.add_value_for_range(leaf_range, leaf.clone());
+        }
+
         debug_assert!(value_builder.current_range().is_none());
     }
 
@@ -1732,13 +1760,13 @@ mod test {
         assert_eq!(list.get(&100), None);
 
         list.insert_at_height(0, 3, 13);
-        insta::assert_snapshot!(list.output_dot());
         // println!("{}", list.output_dot());
         assert_eq!(list.get(&0), Some(&6));
         assert_eq!(list.get(&1), Some(&1));
         assert_eq!(list.get(&3), Some(&13));
         assert_eq!(list.get(&7), Some(&71));
         assert_eq!(list.get(&100), None);
+        insta::assert_snapshot!(list.output_dot());
     }
 
     #[test]
@@ -1751,11 +1779,10 @@ mod test {
         list.insert(10246746, 0);
         assert_eq!(list.get(&10246746), Some(&0));
         list.insert(1, 1515847770);
-        // println!("{}", list.output_dot());
-        insta::assert_snapshot!(list.output_dot());
         assert_eq!(list.get(&1), Some(&1515847770));
         assert_eq!(list.get(&0), Some(&16777216));
         assert_eq!(list.get(&10246746), Some(&0));
+        insta::assert_snapshot!(list.output_dot());
     }
 
     // TODO this case seems less than ideal, but I don't know if it can be
@@ -1945,7 +1972,7 @@ mod test {
         list.insert(0, 0);
         list.insert(1862270976, 1869573999);
         list.insert(1869573999, 249786223);
-        println!("{}", list.output_dot());
+        // println!("{}", list.output_dot());
         insta::assert_snapshot!(list.output_dot());
     }
 
@@ -1960,8 +1987,30 @@ mod test {
         list.insert(286331153, 286331153);
         list.insert(286331153, 286331153);
         list.insert(286331153, 1785358954);
-        println!("{}", list.output_dot());
+        // println!("{}", list.output_dot());
         list.insert(2290186071, 2439670479);
+        // println!("{}", list.output_dot());
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn only_applicable_leaf_entries_are_used() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(4294901760, 1817860863);
+        list.insert(771751932, 2801729569);
+        list.insert(2231312685, 4217022207);
+        list.insert(4282066727, 16777086);
+        assert_eq!(list.get(&4294901760), Some(&1817860863));
+        insta::assert_snapshot!(list.output_dot());
+    }
+
+    #[test]
+    fn include_first_pending_entries_in_leaves() {
+        let mut list: super::List<u32, u32> = super::List::new(3);
+        list.insert(0, 1509949530);
+        list.insert(1509949440, 16777216);
+        list.insert(10246746, 0);
+        list.insert(23041, 1515847680);
         println!("{}", list.output_dot());
         insta::assert_snapshot!(list.output_dot());
     }
@@ -2254,7 +2303,7 @@ mod perf {
             list.insert(rand::random(), rand::random());
         }
         let counts = COUNTERS.with(|c| c.counts());
-        // counts.print();
+        counts.print();
         println!("{}", list.output_simple_dot());
     }
 

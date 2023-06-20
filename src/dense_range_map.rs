@@ -83,7 +83,7 @@ impl<K, V> DenseRangeMap<K, V> {
         let possible_ends = &self.keys[start_idx..];
         let possible_values = &self.values[start_idx..];
 
-        // 2. find the smallest entry > end
+        // 2. find the smallest entry >= end
         let end_idx = possible_ends.partition_point(|k| k.as_ref() < end);
 
         SubEntries {
@@ -325,6 +325,14 @@ impl<K> Range<K> {
         K: Ord,
     {
         self.start <= bound.start && self.end >= bound.end
+    }
+
+    pub fn overlaps(self, other: Range<K>) -> bool
+    where
+        K: Ord,
+    {
+        (self.start <= other.start && self.end >= other.end)
+            || (other.start <= self.start && other.end >= self.end)
     }
 
     pub fn contains_bound(self, bound: RangeBound<K>) -> bool
